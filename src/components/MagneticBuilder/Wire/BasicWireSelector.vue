@@ -4,6 +4,7 @@ import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import BasicWireSubmenu from './BasicWireSubmenu.vue'
 import WireInfo from './WireInfo.vue'
 import BasicTurnsSelector from './BasicTurnsSelector.vue'
+import BasicLabelPinSelector from './BasicLabelPinSelector.vue'
 import Wire2DVisualizer from '/WebSharedComponents/Common/Wire2DVisualizer.vue'
 import WindingSelector from '../Common/WindingSelector.vue'
 import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
@@ -574,6 +575,14 @@ export default {
                     />
                 </div>
             <div class="wire-config-grid">
+                <div v-if="!loading" class="wire-config-cell wire-config-cell-wide">
+                    <BasicLabelPinSelector
+                        :readOnly="readOnly"
+                        :masStore="masStore"
+                        :windingIndex="windingIndex"
+                        :dataTestLabel="dataTestLabel + '-LabelPin'"
+                    />
+                </div>
                 <div v-if="!loading" class="wire-config-cell wire-config-cell-wide">
                     <BasicTurnsSelector
                         :readOnly="readOnly"
