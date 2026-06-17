@@ -125,6 +125,25 @@ export default {
                 this.$styleStore.magneticBuilder.inputFontSize,
             ]);
         },
+        // Simple terminal mode -> per-lead type is owned by Design Requirements, so lock it here (default Basic).
+        lockTerminalType() {
+            const modes = this.$stateStore.MagneticBuilderModes;
+            const mode = this.$stateStore.magneticBuilder.mode.terminal;
+            return (mode != null ? mode : modes.Basic) === modes.Basic;
+        },
+        // Type to seed a new lead with: this winding's requirement entry, else the first, else Pin.
+        defaultTerminalType() {
+            const inputs = this.masStore.mas.inputs;
+            const terminalType = inputs != null ? inputs.designRequirements.terminalType : null;
+            if (Array.isArray(terminalType) && terminalType.length > 0) {
+                const value = terminalType[this.windingIndex] != null
+                    ? terminalType[this.windingIndex] : terminalType[0];
+                if (value != null) {
+                    return value;
+                }
+            }
+            return ConnectionType.Pin;
+        },
     },
     watch: {
         windingIndex() {
@@ -148,8 +167,8 @@ export default {
                 return;
             }
             const defaults = [
-                { pinName: '1', type: ConnectionType.Pin },
-                { pinName: '2', type: ConnectionType.Pin },
+                { pinName: '1', type: this.defaultTerminalType },
+                { pinName: '2', type: this.defaultTerminalType },
             ];
             if (!Array.isArray(winding.connections) || winding.connections.length < 2) {
                 const merged = Array.isArray(winding.connections) ? winding.connections.slice() : [];
@@ -224,6 +243,10 @@ export default {
             if (this.readOnly) {
                 return;
             }
+            // In Simple terminal mode the terminal type is owned by Design Requirements.
+            if (key === 'type' && this.lockTerminalType) {
+                return;
+            }
             const winding = this.winding;
             if (winding == null || !Array.isArray(winding.connections) || winding.connections[index] == null) {
                 return;
@@ -234,6 +257,34 @@ export default {
             if (key === 'type' && value === this.blindType) {
                 delete winding.connections[index].length;
             }
+            // connection.type is source of truth; sync the per-winding terminalType projection.
+            if (key === 'type') {
+                this.syncTerminalTypeProjection();
+            }
+        },
+        // Refresh terminalType[windingIndex] from this winding's lead types (most common, ignoring blind).
+        syncTerminalTypeProjection() {
+            const inputs = this.masStore.mas.inputs;
+            if (inputs == null || inputs.designRequirements.terminalType == null) {
+                return;
+            }
+            const winding = this.winding;
+            const connections = (winding != null && Array.isArray(winding.connections)) ? winding.connections : [];
+            const types = connections
+                .map((connection) => (connection != null ? connection.type : null))
+                .filter((type) => type != null && type !== '' && type !== this.blindType);
+            if (types.length === 0) {
+                return;
+            }
+            const counts = {};
+            let best = types[0];
+            types.forEach((type) => {
+                counts[type] = (counts[type] || 0) + 1;
+                if (counts[type] > (counts[best] || 0)) {
+                    best = type;
+                }
+            });
+            inputs.designRequirements.terminalType[this.windingIndex] = best;
         },
         // length is stored in metres (MAS); the field edits millimetres. Round to
         // kill the float noise from the m<->mm scaling (e.g. 0.0123 m -> 12.3 mm).
@@ -275,7 +326,7 @@ export default {
                 return;
             }
             const nextPin = String(winding.connections.length + 1);
-            winding.connections.push({ pinName: nextPin, type: ConnectionType.Pin });
+            winding.connections.push({ pinName: nextPin, type: this.defaultTerminalType });
         },
         removeConnection(index) {
             if (this.readOnly) {
@@ -399,10 +450,10 @@ export default {
                         class="labelpin-field"
                         :style="fieldStyle"
                         :class="fieldClass"
-                        :disabled="readOnly"
+                        :disabled="readOnly || lockTerminalType"
                         :value="connection.type"
                         :data-cy="dataTestLabel + '-Connection-' + index + '-Type'"
-                        v-tooltip="'Terminal type'"
+                        v-tooltip="lockTerminalType ? 'Terminal type is set for all windings in Design Requirements (Simple mode). Switch it to Advanced there to edit per lead.' : 'Terminal type'"
                         @change="updateConnection(index, 'type', $event.target.value)"
                     >
                         <option v-for="opt in connectionTypeOptions" :key="opt" :value="opt">{{ opt }}</option>
