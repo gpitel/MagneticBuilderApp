@@ -119,6 +119,19 @@ export default {
                     }
                 }
                 if (name == "newWireCreated") {
+                    if (args[0] && this.masStore.hasMirroredWindings && !this.taskQueueStore.windingIndexChangeBlock) {
+                        const newWire = args[1];
+                        if (newWire && this.masStore.mas.magnetic.coil.functionalDescription.length > 1) {
+                            const modifiedWindingIndex = this.selectedWindingIndex;
+                            const tempCoilFunctionalDescription = deepCopy(this.masStore.mas.magnetic.coil.functionalDescription);
+                            this.masStore.mas.magnetic.coil.functionalDescription.forEach((_, windingIndex) => {
+                                if (modifiedWindingIndex != windingIndex) {
+                                    tempCoilFunctionalDescription[windingIndex].wire = newWire;
+                                }
+                            });
+                            this.masStore.mas.magnetic.coil.functionalDescription = tempCoilFunctionalDescription;
+                        }
+                    }
                     if (this.$settingsStore.magneticBuilderSettings.autoRedraw) {
                         this.imageUpToDate = true;
                         this.forceUpdate += 1;
@@ -140,7 +153,7 @@ export default {
         turnsUpdated(modifiedWindingIndex) {
             if (!this.blockingRebounds && !this.taskQueueStore.windingIndexChangeBlock) {
                 this.blockingRebounds = true;
-                if (this.$stateStore.hasCurrentApplicationMirroredWindings()) {
+                if (this.masStore.hasMirroredWindings) {
                     const tempCoilFunctionalDescription = deepCopy(this.masStore.mas.magnetic.coil.functionalDescription)
                     this.masStore.mas.magnetic.coil.functionalDescription.forEach((_, windingIndex) => {
                         if (modifiedWindingIndex != windingIndex) {
@@ -157,7 +170,7 @@ export default {
         wireUpdated(modifiedWindingIndex) {
             if (!this.blockingRebounds && !this.taskQueueStore.windingIndexChangeBlock) {
                 this.blockingRebounds = true;
-                if (this.$stateStore.hasCurrentApplicationMirroredWindings()) {
+                if (this.masStore.hasMirroredWindings) {
                     const tempCoilFunctionalDescription = deepCopy(this.masStore.mas.magnetic.coil.functionalDescription)
                     this.masStore.mas.magnetic.coil.functionalDescription.forEach((_, windingIndex) => {
                         if (modifiedWindingIndex != windingIndex) {
@@ -225,7 +238,7 @@ export default {
 
     <div v-else class="container">
         <div v-if="isIsolatedApp" class="row">
-            <ElementFromList class="border-bottom py-2 px-4 col-12 text-start"
+            <ElementFromList class="border-bottom py-2 px-4 col-12 text-left"
                 :name="'numberWindings'"
                 :disabled="readOnly"
                 :dataTestLabel="dataTestLabel + '-NumberWindings'"
@@ -247,7 +260,7 @@ export default {
         <div class="row">
             <div v-for="value, key in masStore.mas.magnetic.coil.functionalDescription" :key="key">
                 <BasicWireSelector
-                    v-if="selectedWindingIndex==key && (masStore.mas.inputs.designRequirements.wiringTechnology == null || masStore.mas.inputs.designRequirements.wiringTechnology == 'Wound')"
+                    v-if="selectedWindingIndex==key && (masStore.mas.inputs.designRequirements.wiringTechnology == null || masStore.mas.inputs.designRequirements.wiringTechnology == 'wound')"
                     :masStore="masStore"
                     :readOnly="readOnly"
                     :operatingPointIndex="operatingPointIndex"
@@ -264,7 +277,7 @@ export default {
                     @windingIndexChanged="windingIndexChanged"
                 />
                 <PlanarWireSelector
-                    v-if="selectedWindingIndex==key && (masStore.mas.inputs.designRequirements.wiringTechnology != null && masStore.mas.inputs.designRequirements.wiringTechnology == 'Printed')"
+                    v-if="selectedWindingIndex==key && (masStore.mas.inputs.designRequirements.wiringTechnology != null && masStore.mas.inputs.designRequirements.wiringTechnology == 'printed')"
                     :masStore="masStore"
                     :readOnly="readOnly"
                     :operatingPointIndex="operatingPointIndex"
@@ -289,10 +302,10 @@ export default {
 <style type="text/css">
 /* --------------------------- webkit browsers */
 .slider::-webkit-slider-thumb {
-  background-color: var(--bs-primary);
+  background-color: var(--p-primary);
 }
 /* -------------------------- Firefox */
 .slider::-moz-range-thumb { 
-  background-color: var(--bs-primary);
+  background-color: var(--p-primary);
 }
 </style>

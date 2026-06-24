@@ -27,7 +27,7 @@ export default {
                 x: [0, 1],
                 y: [0, 1],
             },
-            colorLabel: '#b18aea',
+            colorLabel: getComputedStyle(document.documentElement).getPropertyValue('--p-primary').trim() || 'var(--p-primary)',
             type: 'value', // log or value
             position: 'left',
             unit: 'H',
@@ -35,7 +35,7 @@ export default {
         }]
         const dcBiasData = {
             label: 'DC Bias',
-            colorLabel: '#d4d4d4',
+            colorLabel: getComputedStyle(document.documentElement).getPropertyValue('--p-secondary').trim() || 'var(--p-secondary)',
             type: 'value', // log or value
             unit: 'A',
         }
@@ -153,22 +153,25 @@ export default {
 
 <template>
     <div class="graph-wrapper">
-        <div class="row g-3">
-            <div class="col-12 col-md-3">
+        <div class="grid">
+            <div class="col-12 md:col-3">
                 <div class="graph-params">
                     <slot/>
                 </div>
             </div>
-            <div class="col-12 col-md-9 graph-viz-col">
+            <div class="col-12 md:col-9 graph-viz-col">
                 <img :data-cy="dataTestLabel + '-MagnetizingInductancesOverDcBias-loading'" v-if="loading" class="mx-auto d-block graph-loading" alt="loading" :src="$settingsStore.loadingGif">
                 <LineVisualizer 
                     v-show="!loading"
                     :data="magnetizingInductanceOverDcBiasData"
                     :xAxisOptions="dcBiasData"
                     :title="'Magnetizing Inductance over DC Bias'"
+                    :linePaddings="{top: 1.1, left: 1, right: 1, bottom: 1.1}"
                     :forceUpdate="forceUpdate"
                     :bgColor="$styleStore.magneticBuilder.graphBgColor['background-color']"
                     :lineColor="$styleStore.magneticBuilder.graphLineColor.color"
+                    :showPoints="false"
+                    :tooltipTrigger="'axis'"
                     :pointsColor="$styleStore.magneticBuilder.graphPointsColor.color"
                     :textColor="$styleStore.magneticBuilder.inputTextColor.color"
                 />
@@ -183,8 +186,8 @@ export default {
 }
 
 .graph-params {
-    background: rgba(var(--bs-light-rgb), 0.04);
-    border: 1px solid rgba(var(--bs-light-rgb), 0.1);
+    background: rgba(var(--p-white-rgb), 0.04);
+    border: 1px solid rgba(var(--p-white-rgb), 0.1);
     border-radius: 12px;
     padding: 0.6rem 0.55rem;
     display: flex;

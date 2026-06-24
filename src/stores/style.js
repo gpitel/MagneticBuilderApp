@@ -5,16 +5,16 @@ export const useStyleStore = defineStore("style", () => {
     const style = getComputedStyle(document.body);
 
     const theme = {
-        primary: style.getPropertyValue('--bs-primary'),
-        secondary: style.getPropertyValue('--bs-secondary'),
-        success: style.getPropertyValue('--bs-success'),
-        info: style.getPropertyValue('--bs-info'),
-        warning: style.getPropertyValue('--bs-warning'),
-        danger: style.getPropertyValue('--bs-danger'),
-        light: style.getPropertyValue('--bs-light'),
-        dark: style.getPropertyValue('--bs-dark'),
-        white: style.getPropertyValue('--bs-white'),
-        transparent: style.getPropertyValue('--bs-transparent'),
+        primary: style.getPropertyValue('--p-primary'),
+        secondary: style.getPropertyValue('--p-secondary'),
+        success: style.getPropertyValue('--p-success'),
+        info: style.getPropertyValue('--p-info'),
+        warning: style.getPropertyValue('--p-warning'),
+        danger: style.getPropertyValue('--p-danger'),
+        light: style.getPropertyValue('--p-light'),
+        dark: style.getPropertyValue('--p-dark'),
+        white: style.getPropertyValue('--p-white'),
+        transparent: style.getPropertyValue('--p-transparent'),
     };
 
     const engineLoader = ref({

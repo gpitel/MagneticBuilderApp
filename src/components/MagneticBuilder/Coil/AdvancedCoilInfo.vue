@@ -969,7 +969,7 @@ export default {
             <!-- Left Column: Resistance -->
             <div class="advancedcoil-card">
                 <div class="advancedcoil-card-header">
-                    <i class="fa-solid fa-bolt"></i>
+                    <i class="pi pi-bolt"></i>
                     <span>Resistance</span>
                 </div>
                 <div class="advancedcoil-card-body">
@@ -991,7 +991,7 @@ export default {
                         </div>
                     </div>
                     <div v-if="masStore.mas?.magnetic?.coil?.turnsDescription" class="advancedcoil-hint">
-                        <i class="fas fa-info-circle"></i> Hover over the image to see values
+                        <i class="pi pi-info-circle"></i> Hover over the image to see values
                     </div>
                     
                     <div class="advancedcoil-freq">
@@ -1008,14 +1008,14 @@ export default {
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize || '14px'"
                             :labelFontSize="$styleStore.magneticBuilder.inputLabelFontSize || '14px'"
                             :labelBgColor="'transparent'"
-                            :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor || '#3a3a3a'"
-                            :textColor="$styleStore.magneticBuilder.inputTextColor || '#fff'"
+                            :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor || 'var(--p-gray-700)'"
+                            :textColor="$styleStore.magneticBuilder.inputTextColor || 'var(--p-white)'"
                         />
                     </div>
                     
                     <div class="advancedcoil-matrix">
                         <div v-if="calculatingMatrices" class="advancedcoil-loading">
-                            <i class="fas fa-spinner fa-spin"></i> Calculating...
+                            <i class="pi pi-refresh fa-spin"></i> Calculating...
                         </div>
                         <vue-latex
                             v-else-if="resistanceMatrixLatex && resistanceMatrix"
@@ -1033,7 +1033,7 @@ export default {
             <!-- Middle Column: Leakage Inductance -->
             <div class="advancedcoil-card">
                 <div class="advancedcoil-card-header">
-                    <i class="fa-solid fa-magnet"></i>
+                    <i class="pi pi-cog"></i>
                     <span>Leakage Inductance</span>
                 </div>
                 <div class="advancedcoil-card-body">
@@ -1058,13 +1058,13 @@ export default {
                         </div>
                     </div>
                     <div v-if="masStore.mas?.magnetic?.coil?.turnsDescription" class="advancedcoil-hint">
-                        <i class="fas fa-info-circle"></i> Hover over the image to see values
+                        <i class="pi pi-info-circle"></i> Hover over the image to see values
                     </div>
                     
                     <div class="advancedcoil-matrix">
                         <span class="advancedcoil-matrix-title">Inductance Matrix</span>
                         <div v-if="calculatingMatrices" class="advancedcoil-loading">
-                            <i class="fas fa-spinner fa-spin"></i> Calculating...
+                            <i class="pi pi-refresh fa-spin"></i> Calculating...
                         </div>
                         <vue-latex
                             v-else-if="inductanceMatrixLatex"
@@ -1080,7 +1080,7 @@ export default {
                     <div class="advancedcoil-matrix">
                         <span class="advancedcoil-matrix-title">Leakage Inductance Matrix</span>
                         <div v-if="calculatingMatrices" class="advancedcoil-loading">
-                            <i class="fas fa-spinner fa-spin"></i> Calculating...
+                            <i class="pi pi-refresh fa-spin"></i> Calculating...
                         </div>
                         <vue-latex
                             v-else-if="leakageInductanceMatrixLatex"
@@ -1096,7 +1096,7 @@ export default {
                     <div class="advancedcoil-matrix">
                         <span class="advancedcoil-matrix-title">Coupling Coefficient</span>
                         <div v-if="calculatingMatrices" class="advancedcoil-loading">
-                            <i class="fas fa-spinner fa-spin"></i> Calculating...
+                            <i class="pi pi-refresh fa-spin"></i> Calculating...
                         </div>
                         <vue-latex
                             v-else-if="couplingCoefficientMatrixLatex"
@@ -1114,7 +1114,7 @@ export default {
             <!-- Right Column: Stray Capacitance -->
             <div class="advancedcoil-card">
                 <div class="advancedcoil-card-header">
-                    <i class="fa-solid fa-broadcast-tower"></i>
+                    <i class="pi pi-wifi"></i>
                     <span>Stray Capacitance</span>
                 </div>
                 <div class="advancedcoil-card-body">
@@ -1136,13 +1136,13 @@ export default {
                         </div>
                     </div>
                     <div v-if="masStore.mas?.magnetic?.coil?.turnsDescription" class="advancedcoil-hint">
-                        <i class="fas fa-info-circle"></i> Hover over the image to see values
+                        <i class="pi pi-info-circle"></i> Hover over the image to see values
                     </div>
                     
                     <div class="advancedcoil-matrix">
                         <span class="advancedcoil-matrix-title">Capacitance Matrix (All Windings)</span>
                         <div v-if="calculatingMatrices" class="advancedcoil-loading">
-                            <i class="fas fa-spinner fa-spin"></i> Calculating...
+                            <i class="pi pi-refresh fa-spin"></i> Calculating...
                         </div>
                         <vue-latex
                             v-else-if="capacitanceMatrixAllWindingsLatex"
@@ -1195,7 +1195,7 @@ export default {
                         <span class="advancedcoil-matrix-title">Maxwell Capacitance Matrix</span>
                         <span class="advancedcoil-matrix-subtitle">{{ selectedWindingPair.primary }} - {{ selectedWindingPair.secondary }}</span>
                         <div v-if="calculatingMatrices" class="advancedcoil-loading">
-                            <i class="fas fa-spinner fa-spin"></i> Calculating...
+                            <i class="pi pi-refresh fa-spin"></i> Calculating...
                         </div>
                         <vue-latex
                             v-else-if="maxwellCapacitanceMatrixForSelectedPairLatex"
@@ -1213,58 +1213,58 @@ export default {
                         <div class="advancedcoil-circuit-subtitle">{{ threeCapacitorModel.windingNames[0] }} - {{ threeCapacitorModel.windingNames[1] }}</div>
                         
                         <svg viewBox="0 0 320 230" class="advancedcoil-circuit-svg">
-                            <circle cx="60" cy="40" r="4" fill="#fff" stroke="#fff" stroke-width="2"/>
-                            <text x="48" y="35" font-size="14" fill="#fff" font-weight="bold">A</text>
+                            <circle cx="60" cy="40" r="4" fill="var(--p-white)" stroke="var(--p-white)" stroke-width="2"/>
+                            <text x="48" y="35" font-size="14" fill="var(--p-white)" font-weight="bold">A</text>
                             
-                            <circle cx="60" cy="160" r="4" fill="#fff" stroke="#fff" stroke-width="2"/>
-                            <text x="48" y="175" font-size="14" fill="#fff" font-weight="bold">B</text>
+                            <circle cx="60" cy="160" r="4" fill="var(--p-white)" stroke="var(--p-white)" stroke-width="2"/>
+                            <text x="48" y="175" font-size="14" fill="var(--p-white)" font-weight="bold">B</text>
                             
-                            <line x1="60" y1="40" x2="100" y2="40" stroke="#fff" stroke-width="2"/>
-                            <line x1="60" y1="160" x2="100" y2="160" stroke="#fff" stroke-width="2"/>
+                            <line x1="60" y1="40" x2="100" y2="40" stroke="var(--p-white)" stroke-width="2"/>
+                            <line x1="60" y1="160" x2="100" y2="160" stroke="var(--p-white)" stroke-width="2"/>
                             
                             <path d="M 100 40 Q 115 40 115 52 Q 115 64 100 64 Q 85 64 85 76 Q 85 88 100 88 Q 115 88 115 100 Q 115 112 100 112 Q 85 112 85 124 Q 85 136 100 136 Q 115 136 115 148 Q 115 160 100 160" 
-                                  stroke="#fff" stroke-width="2" fill="none"/>
+                                  stroke="var(--p-white)" stroke-width="2" fill="none"/>
                             
-                            <line x1="150" y1="50" x2="150" y2="150" stroke="#fff" stroke-width="3"/>
-                            <line x1="165" y1="50" x2="165" y2="150" stroke="#fff" stroke-width="3"/>
+                            <line x1="150" y1="50" x2="150" y2="150" stroke="var(--p-white)" stroke-width="3"/>
+                            <line x1="165" y1="50" x2="165" y2="150" stroke="var(--p-white)" stroke-width="3"/>
                             
                             <path d="M 215 40 Q 200 40 200 52 Q 200 64 215 64 Q 230 64 230 76 Q 230 88 215 88 Q 200 88 200 100 Q 200 112 215 112 Q 230 112 230 124 Q 230 136 215 136 Q 200 136 200 148 Q 200 160 215 160" 
-                                  stroke="#fff" stroke-width="2" fill="none"/>
+                                  stroke="var(--p-white)" stroke-width="2" fill="none"/>
                             
-                            <line x1="215" y1="40" x2="255" y2="40" stroke="#fff" stroke-width="2"/>
-                            <line x1="215" y1="160" x2="255" y2="160" stroke="#fff" stroke-width="2"/>
+                            <line x1="215" y1="40" x2="255" y2="40" stroke="var(--p-white)" stroke-width="2"/>
+                            <line x1="215" y1="160" x2="255" y2="160" stroke="var(--p-white)" stroke-width="2"/>
                             
-                            <circle cx="255" cy="40" r="4" fill="#fff" stroke="#fff" stroke-width="2"/>
-                            <text x="265" y="35" font-size="14" fill="#fff" font-weight="bold">C</text>
+                            <circle cx="255" cy="40" r="4" fill="var(--p-white)" stroke="var(--p-white)" stroke-width="2"/>
+                            <text x="265" y="35" font-size="14" fill="var(--p-white)" font-weight="bold">C</text>
                             
-                            <circle cx="255" cy="160" r="4" fill="#fff" stroke="#fff" stroke-width="2"/>
-                            <text x="265" y="175" font-size="14" fill="#fff" font-weight="bold">D</text>
+                            <circle cx="255" cy="160" r="4" fill="var(--p-white)" stroke="var(--p-white)" stroke-width="2"/>
+                            <text x="265" y="175" font-size="14" fill="var(--p-white)" font-weight="bold">D</text>
                             
-                            <line x1="5" y1="92" x2="35" y2="92" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="5" y1="108" x2="35" y2="108" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="20" y1="40" x2="20" y2="92" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="20" y1="108" x2="20" y2="160" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="60" y1="40" x2="20" y2="40" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="60" y1="160" x2="20" y2="160" stroke="#fff" stroke-width="1.5"/>
-                            <text x="40" y="102" font-size="14" fill="#fff" font-style="italic" font-weight="bold">C₁</text>
+                            <line x1="5" y1="92" x2="35" y2="92" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="5" y1="108" x2="35" y2="108" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="20" y1="40" x2="20" y2="92" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="20" y1="108" x2="20" y2="160" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="60" y1="40" x2="20" y2="40" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="60" y1="160" x2="20" y2="160" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <text x="40" y="102" font-size="14" fill="var(--p-white)" font-style="italic" font-weight="bold">C₁</text>
                             
-                            <line x1="285" y1="92" x2="315" y2="92" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="285" y1="108" x2="315" y2="108" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="300" y1="40" x2="300" y2="92" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="300" y1="108" x2="300" y2="160" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="40" x2="300" y2="40" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="160" x2="300" y2="160" stroke="#fff" stroke-width="1.5"/>
-                            <text x="265" y="102" font-size="14" fill="#fff" font-style="italic" font-weight="bold">C₂</text>
+                            <line x1="285" y1="92" x2="315" y2="92" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="285" y1="108" x2="315" y2="108" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="300" y1="40" x2="300" y2="92" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="300" y1="108" x2="300" y2="160" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="40" x2="300" y2="40" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="160" x2="300" y2="160" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <text x="265" y="102" font-size="14" fill="var(--p-white)" font-style="italic" font-weight="bold">C₂</text>
                             
-                            <line x1="147" y1="174" x2="147" y2="198" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="163" y1="174" x2="163" y2="198" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="60" y1="186" x2="147" y2="186" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="147" y1="186" x2="147" y2="174" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="186" x2="163" y2="186" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="163" y1="186" x2="163" y2="174" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="60" y1="160" x2="60" y2="186" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="160" x2="255" y2="186" stroke="#fff" stroke-width="1.5"/>
-                            <text x="172" y="168" font-size="14" fill="#fff" font-style="italic" font-weight="bold">C₃</text>
+                            <line x1="147" y1="174" x2="147" y2="198" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="163" y1="174" x2="163" y2="198" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="60" y1="186" x2="147" y2="186" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="147" y1="186" x2="147" y2="174" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="186" x2="163" y2="186" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="163" y1="186" x2="163" y2="174" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="60" y1="160" x2="60" y2="186" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="160" x2="255" y2="186" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <text x="172" y="168" font-size="14" fill="var(--p-white)" font-style="italic" font-weight="bold">C₃</text>
                         </svg>
                         
                         <div class="advancedcoil-circuit-values">
@@ -1285,80 +1285,80 @@ export default {
                         <div class="advancedcoil-circuit-subtitle">{{ sixCapacitorModel.windingNames[0] }} - {{ sixCapacitorModel.windingNames[1] }}</div>
                         
                         <svg viewBox="0 0 320 240" class="advancedcoil-circuit-svg">
-                            <circle cx="60" cy="40" r="4" fill="#fff" stroke="#fff" stroke-width="2"/>
-                            <text x="48" y="35" font-size="14" fill="#fff" font-weight="bold">A</text>
+                            <circle cx="60" cy="40" r="4" fill="var(--p-white)" stroke="var(--p-white)" stroke-width="2"/>
+                            <text x="48" y="35" font-size="14" fill="var(--p-white)" font-weight="bold">A</text>
                             
-                            <circle cx="60" cy="160" r="4" fill="#fff" stroke="#fff" stroke-width="2"/>
-                            <text x="48" y="175" font-size="14" fill="#fff" font-weight="bold">B</text>
+                            <circle cx="60" cy="160" r="4" fill="var(--p-white)" stroke="var(--p-white)" stroke-width="2"/>
+                            <text x="48" y="175" font-size="14" fill="var(--p-white)" font-weight="bold">B</text>
                             
                             <path d="M 100 40 Q 115 40 115 52 Q 115 64 100 64 Q 85 64 85 76 Q 85 88 100 88 Q 115 88 115 100 Q 115 112 100 112 Q 85 112 85 124 Q 85 136 100 136 Q 115 136 115 148 Q 115 160 100 160" 
-                                  stroke="#fff" stroke-width="2" fill="none" opacity="0.25"/>
+                                  stroke="var(--p-white)" stroke-width="2" fill="none" opacity="0.25"/>
                             
-                            <line x1="150" y1="50" x2="150" y2="150" stroke="#fff" stroke-width="3" opacity="0.25"/>
-                            <line x1="165" y1="50" x2="165" y2="150" stroke="#fff" stroke-width="3" opacity="0.25"/>
+                            <line x1="150" y1="50" x2="150" y2="150" stroke="var(--p-white)" stroke-width="3" opacity="0.25"/>
+                            <line x1="165" y1="50" x2="165" y2="150" stroke="var(--p-white)" stroke-width="3" opacity="0.25"/>
                             
                             <path d="M 215 40 Q 200 40 200 52 Q 200 64 215 64 Q 230 64 230 76 Q 230 88 215 88 Q 200 88 200 100 Q 200 112 215 112 Q 230 112 230 124 Q 230 136 215 136 Q 200 136 200 148 Q 200 160 215 160" 
-                                  stroke="#fff" stroke-width="2" fill="none" opacity="0.25"/>
+                                  stroke="var(--p-white)" stroke-width="2" fill="none" opacity="0.25"/>
                             
-                            <line x1="60" y1="40" x2="100" y2="40" stroke="#fff" stroke-width="2" opacity="0.25"/>
-                            <line x1="60" y1="160" x2="100" y2="160" stroke="#fff" stroke-width="2" opacity="0.25"/>
+                            <line x1="60" y1="40" x2="100" y2="40" stroke="var(--p-white)" stroke-width="2" opacity="0.25"/>
+                            <line x1="60" y1="160" x2="100" y2="160" stroke="var(--p-white)" stroke-width="2" opacity="0.25"/>
                             
-                            <line x1="215" y1="40" x2="255" y2="40" stroke="#fff" stroke-width="2" opacity="0.25"/>
-                            <line x1="215" y1="160" x2="255" y2="160" stroke="#fff" stroke-width="2" opacity="0.25"/>
+                            <line x1="215" y1="40" x2="255" y2="40" stroke="var(--p-white)" stroke-width="2" opacity="0.25"/>
+                            <line x1="215" y1="160" x2="255" y2="160" stroke="var(--p-white)" stroke-width="2" opacity="0.25"/>
                             
-                            <circle cx="255" cy="40" r="4" fill="#fff" stroke="#fff" stroke-width="2"/>
-                            <text x="265" y="35" font-size="14" fill="#fff" font-weight="bold">C</text>
+                            <circle cx="255" cy="40" r="4" fill="var(--p-white)" stroke="var(--p-white)" stroke-width="2"/>
+                            <text x="265" y="35" font-size="14" fill="var(--p-white)" font-weight="bold">C</text>
                             
-                            <circle cx="255" cy="160" r="4" fill="#fff" stroke="#fff" stroke-width="2"/>
-                            <text x="265" y="175" font-size="14" fill="#fff" font-weight="bold">D</text>
+                            <circle cx="255" cy="160" r="4" fill="var(--p-white)" stroke="var(--p-white)" stroke-width="2"/>
+                            <text x="265" y="175" font-size="14" fill="var(--p-white)" font-weight="bold">D</text>
                             
-                            <line x1="5" y1="92" x2="35" y2="92" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="5" y1="108" x2="35" y2="108" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="20" y1="40" x2="20" y2="92" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="20" y1="108" x2="20" y2="160" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="60" y1="40" x2="20" y2="40" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="60" y1="160" x2="20" y2="160" stroke="#fff" stroke-width="1.5"/>
-                            <text x="40" y="102" font-size="14" fill="#fff" font-style="italic" font-weight="bold">C₁</text>
+                            <line x1="5" y1="92" x2="35" y2="92" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="5" y1="108" x2="35" y2="108" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="20" y1="40" x2="20" y2="92" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="20" y1="108" x2="20" y2="160" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="60" y1="40" x2="20" y2="40" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="60" y1="160" x2="20" y2="160" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <text x="40" y="102" font-size="14" fill="var(--p-white)" font-style="italic" font-weight="bold">C₁</text>
                             
-                            <line x1="285" y1="92" x2="315" y2="92" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="285" y1="108" x2="315" y2="108" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="300" y1="40" x2="300" y2="92" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="300" y1="108" x2="300" y2="160" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="40" x2="300" y2="40" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="160" x2="300" y2="160" stroke="#fff" stroke-width="1.5"/>
-                            <text x="265" y="102" font-size="14" fill="#fff" font-style="italic" font-weight="bold">C₂</text>
+                            <line x1="285" y1="92" x2="315" y2="92" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="285" y1="108" x2="315" y2="108" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="300" y1="40" x2="300" y2="92" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="300" y1="108" x2="300" y2="160" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="40" x2="300" y2="40" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="160" x2="300" y2="160" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <text x="265" y="102" font-size="14" fill="var(--p-white)" font-style="italic" font-weight="bold">C₂</text>
                             
-                            <line x1="147" y1="174" x2="147" y2="198" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="163" y1="174" x2="163" y2="198" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="60" y1="186" x2="147" y2="186" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="147" y1="186" x2="147" y2="174" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="186" x2="163" y2="186" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="163" y1="186" x2="163" y2="174" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="60" y1="160" x2="60" y2="186" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="160" x2="255" y2="186" stroke="#fff" stroke-width="1.5"/>
-                            <text x="172" y="168" font-size="14" fill="#fff" font-style="italic" font-weight="bold">C₃</text>
+                            <line x1="147" y1="174" x2="147" y2="198" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="163" y1="174" x2="163" y2="198" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="60" y1="186" x2="147" y2="186" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="147" y1="186" x2="147" y2="174" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="186" x2="163" y2="186" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="163" y1="186" x2="163" y2="174" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="60" y1="160" x2="60" y2="186" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="160" x2="255" y2="186" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <text x="172" y="168" font-size="14" fill="var(--p-white)" font-style="italic" font-weight="bold">C₃</text>
                             
-                            <line x1="147" y1="2" x2="147" y2="26" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="163" y1="2" x2="163" y2="26" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="60" y1="14" x2="147" y2="14" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="147" y1="14" x2="147" y2="26" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="14" x2="163" y2="14" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="163" y1="14" x2="163" y2="26" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="60" y1="40" x2="60" y2="14" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="40" x2="255" y2="14" stroke="#fff" stroke-width="1.5"/>
-                            <text x="172" y="36" font-size="14" fill="#fff" font-style="italic" font-weight="bold">C₄</text>
+                            <line x1="147" y1="2" x2="147" y2="26" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="163" y1="2" x2="163" y2="26" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="60" y1="14" x2="147" y2="14" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="147" y1="14" x2="147" y2="26" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="14" x2="163" y2="14" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="163" y1="14" x2="163" y2="26" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="60" y1="40" x2="60" y2="14" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="40" x2="255" y2="14" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <text x="172" y="36" font-size="14" fill="var(--p-white)" font-style="italic" font-weight="bold">C₄</text>
                             
-                            <line x1="110.5" y1="85.2" x2="122.9" y2="64.8" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="124.1" y1="93.6" x2="136.5" y2="73.2" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="60" y1="40" x2="116.7" y2="75" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="160" x2="130.3" y2="83.4" stroke="#fff" stroke-width="1.5"/>
-                            <text x="138" y="68" font-size="14" fill="#fff" font-style="italic" font-weight="bold">C₅</text>
+                            <line x1="110.5" y1="85.2" x2="122.9" y2="64.8" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="124.1" y1="93.6" x2="136.5" y2="73.2" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="60" y1="40" x2="116.7" y2="75" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="160" x2="130.3" y2="83.4" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <text x="138" y="68" font-size="14" fill="var(--p-white)" font-style="italic" font-weight="bold">C₅</text>
                             
-                            <line x1="178.5" y1="73.2" x2="190.9" y2="93.6" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="192.1" y1="64.8" x2="204.5" y2="85.2" stroke="#fff" stroke-width="2.5"/>
-                            <line x1="60" y1="160" x2="184.7" y2="83.4" stroke="#fff" stroke-width="1.5"/>
-                            <line x1="255" y1="40" x2="198.3" y2="75" stroke="#fff" stroke-width="1.5"/>
-                            <text x="208" y="95" font-size="14" fill="#fff" font-style="italic" font-weight="bold">C₆</text>
+                            <line x1="178.5" y1="73.2" x2="190.9" y2="93.6" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="192.1" y1="64.8" x2="204.5" y2="85.2" stroke="var(--p-white)" stroke-width="2.5"/>
+                            <line x1="60" y1="160" x2="184.7" y2="83.4" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <line x1="255" y1="40" x2="198.3" y2="75" stroke="var(--p-white)" stroke-width="1.5"/>
+                            <text x="208" y="95" font-size="14" fill="var(--p-white)" font-style="italic" font-weight="bold">C₆</text>
                         </svg>
                         
                         <div class="advancedcoil-circuit-values">
@@ -1413,11 +1413,11 @@ export default {
 }
 
 .advancedcoil-card {
-    background: linear-gradient(145deg, rgba(var(--bs-primary-rgb), 0.05) 0%, rgba(var(--bs-primary-rgb), 0.01) 100%);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.12);
+    background: linear-gradient(145deg, rgba(120, 120, 120, 0.05) 0%, rgba(120, 120, 120, 0.01) 100%);
+    border: 1px solid rgba(120, 120, 120, 0.12);
     border-radius: 14px;
     overflow: hidden;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    box-shadow: 0 4px 20px rgba(var(--p-black-rgb), 0.12), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
 }
 
 .advancedcoil-card-header {
@@ -1425,17 +1425,17 @@ export default {
     align-items: center;
     gap: 0.6rem;
     padding: 0.75rem 1rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
+    background: rgba(120, 120, 120, 0.1);
+    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
     font-weight: 600;
     font-size: 0.95rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     letter-spacing: 0.02em;
 }
 
 .advancedcoil-card-header i {
     font-size: 1rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.35));
+    filter: drop-shadow(0 0 3px rgba(var(--p-black-rgb), 0.12));
 }
 
 .advancedcoil-card-body {
@@ -1451,16 +1451,16 @@ export default {
     align-items: center;
     justify-content: center;
     height: 180px;
-    color: rgba(255, 255, 255, 0.45);
+    color: rgba(var(--p-white-rgb), 0.45);
     font-size: 0.9rem;
-    background: rgba(0, 0, 0, 0.15);
+    background: rgba(var(--p-black-rgb), 0.15);
     border-radius: 10px;
 }
 
 .advancedcoil-hint {
     text-align: center;
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(var(--p-white-rgb), 0.5);
     margin: 0.4rem 0 0.6rem;
 }
 
@@ -1472,8 +1472,8 @@ export default {
     text-align: center;
     margin-top: 0.75rem;
     padding: 0.5rem;
-    background: rgba(0, 0, 0, 0.18);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(var(--p-black-rgb), 0.18);
+    border: 1px solid rgba(var(--p-white-rgb), 0.04);
     border-radius: 10px;
 }
 
@@ -1481,30 +1481,30 @@ export default {
     display: block;
     font-size: 0.8rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.75);
+    color: rgba(var(--p-white-rgb), 0.75);
     margin-bottom: 0.3rem;
 }
 
 .advancedcoil-matrix-subtitle {
     display: block;
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(var(--p-white-rgb), 0.5);
     margin-bottom: 0.3rem;
 }
 
 .advancedcoil-loading {
-    color: rgba(255, 255, 255, 0.55);
+    color: rgba(var(--p-white-rgb), 0.55);
     font-size: 0.85rem;
 }
 
 .advancedcoil-empty {
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(var(--p-white-rgb), 0.4);
     font-size: 0.8rem;
     font-style: italic;
 }
 
 .advancedcoil-error {
-    color: var(--bs-danger);
+    color: var(--p-danger);
     font-size: 0.8rem;
     font-style: italic;
 }
@@ -1512,15 +1512,15 @@ export default {
 .advancedcoil-pairbox {
     margin-top: 0.75rem;
     padding: 0.75rem;
-    background: rgba(0, 0, 0, 0.22);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(var(--p-black-rgb), 0.22);
+    border: 1px solid rgba(var(--p-white-rgb), 0.06);
     border-radius: 10px;
 }
 
 .advancedcoil-pairbox-title {
     font-size: 0.8rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(var(--p-white-rgb), 0.9);
     margin-bottom: 0.5rem;
 }
 
@@ -1533,7 +1533,7 @@ export default {
 .advancedcoil-pairbox-field label {
     display: block;
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.65);
+    color: rgba(var(--p-white-rgb), 0.65);
     margin-bottom: 0.2rem;
 }
 
@@ -1541,9 +1541,9 @@ export default {
     width: 100%;
     padding: 0.35rem 0.5rem;
     font-size: 0.85rem;
-    background: rgba(0, 0, 0, 0.35);
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(var(--p-black-rgb), 0.35);
+    color: var(--p-white);
+    border: 1px solid rgba(var(--p-white-rgb), 0.12);
     border-radius: 6px;
     outline: none;
 }
@@ -1551,27 +1551,27 @@ export default {
 .advancedcoil-pairbox-empty {
     text-align: center;
     font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(var(--p-white-rgb), 0.5);
 }
 
 .advancedcoil-circuit {
     margin-top: 0.75rem;
     padding: 0.75rem;
-    background: rgba(0, 0, 0, 0.22);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(var(--p-black-rgb), 0.22);
+    border: 1px solid rgba(var(--p-white-rgb), 0.06);
     border-radius: 10px;
 }
 
 .advancedcoil-circuit-header {
     font-size: 0.8rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(var(--p-white-rgb), 0.9);
     margin-bottom: 0.2rem;
 }
 
 .advancedcoil-circuit-subtitle {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(var(--p-white-rgb), 0.5);
     margin-bottom: 0.5rem;
 }
 
@@ -1589,12 +1589,12 @@ export default {
     justify-content: center;
     gap: 0.4rem 0.8rem;
     margin-top: 0.5rem;
-    color: #fff;
+    color: var(--p-white);
     font-size: 0.8rem;
 }
 
 .advancedcoil-circuit-value {
-    background: rgba(0, 0, 0, 0.25);
+    background: rgba(var(--p-black-rgb), 0.25);
     padding: 0.2rem 0.5rem;
     border-radius: 6px;
 }

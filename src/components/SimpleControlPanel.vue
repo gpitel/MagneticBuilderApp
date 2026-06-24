@@ -39,6 +39,7 @@ export default {
             masExported,
             loading,
             undoRedoBlocked,
+            settingsVisible: false,
         }
     },
     methods: {
@@ -78,8 +79,7 @@ export default {
             setTimeout(() => this.masExported = false, 2000);
         },
         openSettings() {
-            this.masExported = true
-            setTimeout(() => this.masExported = false, 2000);
+            this.settingsVisible = true;
         },
         onSettingsUpdated() {
             // setTimeout(() => {this.$router.push('/engine_loader');}, 100);
@@ -168,6 +168,7 @@ export default {
 <template>
     <Settings
         :modalName="'MagneticBuilderConfigurationModal'"
+        v-model:visible="settingsVisible"
         @onSettingsUpdated="onSettingsUpdated"
     />
     <div class="scp-panel">
@@ -179,7 +180,7 @@ export default {
                 aria-label="Undo"
                 title="Undo"
             >
-                <i class="fa-solid fa-arrow-rotate-left"></i>
+                <i class="pi pi-history"></i>
             </button>
             <button
                 :disabled="!historyStore.isForwardPossible()"
@@ -188,7 +189,7 @@ export default {
                 aria-label="Redo"
                 title="Redo"
             >
-                <i class="fa-solid fa-arrow-rotate-right"></i>
+                <i class="pi pi-refresh"></i>
             </button>
         </div>
 
@@ -199,14 +200,14 @@ export default {
                 class="scp-btn scp-btn-primary"
                 @click="load"
             >
-                <i class="fa-solid fa-folder-open"></i>
+                <i class="pi pi-folder-open"></i>
                 <span>{{loading ? 'Loading…' : 'Load MAS'}}</span>
             </button>
             <button
                 class="scp-btn scp-btn-primary"
                 @click="exportMAS"
             >
-                <i class="fa-solid fa-file-export"></i>
+                <i class="pi pi-file-export"></i>
                 <span>Export MAS</span>
             </button>
         </div>
@@ -215,13 +216,11 @@ export default {
             <button
                 v-if="showConfigurationButton"
                 class="scp-btn scp-btn-icon"
-                data-bs-toggle="modal"
-                data-bs-target="#MagneticBuilderConfigurationModal"
                 @click="openSettings"
                 aria-label="Settings"
                 title="Settings"
                 >
-                <i class="fa-solid fa-gear"></i>
+                <i class="pi pi-cog"></i>
             </button>
             <button
                 v-if="showResetButton"
@@ -230,7 +229,7 @@ export default {
                 aria-label="Reset"
                 title="Reset"
                 >
-                <i class="fa-solid fa-power-off"></i>
+                <i class="pi pi-power-off"></i>
             </button>
         </div>
     </div>
@@ -245,12 +244,12 @@ export default {
     padding: 0.5rem 0.75rem;
     margin: 0.15rem 0 0.5rem 0;
     background: linear-gradient(180deg,
-        rgba(var(--bs-dark-rgb), 0.75) 0%,
-        rgba(var(--bs-dark-rgb), 0.55) 100%);
-    border: 1px solid rgba(var(--bs-light-rgb), 0.08);
-    border-top: 3px solid rgba(var(--bs-primary-rgb), 0.8);
+        rgba(var(--p-dark-rgb), 0.75) 0%,
+        rgba(var(--p-dark-rgb), 0.55) 100%);
+    border: 1px solid rgba(var(--p-white-rgb), 0.08);
+    border-top: 3px solid rgba(var(--p-primary-rgb), 0.8);
     border-radius: 14px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(var(--bs-light-rgb), 0.04);
+    box-shadow: 0 6px 24px rgba(var(--p-black-rgb), 0.45), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     flex-wrap: wrap;
 }
 
@@ -295,44 +294,44 @@ export default {
 
 .scp-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .scp-btn-icon {
-    background: rgba(var(--bs-light-rgb), 0.08);
-    border: 1px solid rgba(var(--bs-light-rgb), 0.22);
-    color: rgba(var(--bs-light-rgb), 0.9);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    background: rgba(var(--p-white-rgb), 0.08);
+    border: 1px solid rgba(var(--p-white-rgb), 0.22);
+    color: rgba(var(--p-white-rgb), 0.9);
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.2);
     min-width: 2.1rem;
     padding: 0.4rem 0.55rem;
 }
 
 .scp-btn-icon:hover:not(:disabled) {
-    background: rgba(var(--bs-primary-rgb), 0.2);
-    border-color: rgba(var(--bs-primary-rgb), 0.55);
-    color: var(--bs-white);
+    background: rgba(var(--p-primary-rgb), 0.2);
+    border-color: rgba(var(--p-primary-rgb), 0.55);
+    color: var(--p-white);
 }
 
 .scp-btn-danger {
-    background: rgb(var(--bs-danger-rgb) / 0.2);
-    border: 1px solid rgb(var(--bs-danger-rgb) / 0.55);
-    color: var(--bs-danger);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    background: rgb(var(--p-danger-rgb) / 0.2);
+    border: 1px solid rgb(var(--p-danger-rgb) / 0.55);
+    color: var(--p-danger);
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.25);
     min-width: 2.1rem;
     padding: 0.4rem 0.55rem;
 }
 
 .scp-btn-danger:hover:not(:disabled) {
-    background: rgb(var(--bs-danger-rgb) / 0.3);
-    border-color: rgb(var(--bs-danger-rgb) / 0.75);
+    background: rgb(var(--p-danger-rgb) / 0.3);
+    border-color: rgb(var(--p-danger-rgb) / 0.75);
 }
 </style>

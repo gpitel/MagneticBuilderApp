@@ -301,7 +301,14 @@ export default {
                 const modelsString = JSON.stringify(modelsData);
 
 
-                if (this.masStore.mas.magnetic.coil.turnsDescription != null && (inputsString != this.lastSimulatedInputs || magneticsString != this.lastSimulatedMagnetics || modelsString != this.lastSimulatedModels)) {
+                // The simulate path eventually reaches LeakageInductance, which
+                // requires BOTH turns AND layers descriptions to be populated.
+                // Without the layers gate, CoilInfo throws [COIL_NOT_PROCESSED]
+                // for coils that have turns but not layers (e.g. between wire
+                // assignment and full Coil::process()).
+                const coil = this.masStore.mas.magnetic.coil;
+                const coilReady = coil.turnsDescription != null && coil.layersDescription != null;
+                if (coilReady && (inputsString != this.lastSimulatedInputs || magneticsString != this.lastSimulatedMagnetics || modelsString != this.lastSimulatedModels)) {
 
                     this.taskQueueStore.simulate(this.masStore.mas, modelsData).then((mas) => {
 
@@ -339,7 +346,7 @@ export default {
     <div v-else class="coilinfo-panel">
         <div class="coilinfo-header">
             <div class="coilinfo-header-left">
-                <i class="fa-solid fa-bolt"></i>
+                <i class="pi pi-bolt"></i>
                 <span>Coil Info</span>
             </div>
             <div v-if="!dataUptoDate && !loading && hasCalculableData" class="coilinfo-outdated-badge">Outdated</div>
@@ -361,7 +368,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.windingLosses"
                             v-if="outputsData.windingLosses != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'P'"
                             :subscriptName="'winding'"
                             :unit="'W'"
@@ -373,8 +380,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -384,7 +391,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.totalLosses"
                             v-if="outputsData.totalLosses != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'P'"
                             :subscriptName="'total'"
                             :unit="'W'"
@@ -396,8 +403,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -407,7 +414,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.ohmicLosses"
                             v-if="outputsData.ohmicLosses != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'P'"
                             :subscriptName="'DC'"
                             :unit="'W'"
@@ -419,8 +426,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -430,7 +437,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.acLosses"
                             v-if="outputsData.acLosses != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'P'"
                             :subscriptName="'AC'"
                             :unit="'W'"
@@ -442,8 +449,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -452,7 +459,7 @@ export default {
                     <div v-if="fillingFactors != null" class="coilinfo-cell">
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.areaFillingFactor"
-                            class="text-start"
+                            class="text-left"
                             :name="'Fill. F'"
                             :subscriptName="'area'"
                             :unit="'%'"
@@ -463,10 +470,10 @@ export default {
                             :value="fillingFactors.areaFillingFactor"
                             :useTitleCase="false"
                             :disableShortenLabels="true"
-                            :labelWidthProportionClass="'col-6'"
-                            :valueWidthProportionClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :labelWidthProportionClass="'col-4'"
+                            :valueWidthProportionClass="'col-8'"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="fillingFactors.areaFillingFactor < 0.8? $styleStore.magneticBuilder.inputTextColor : $styleStore.magneticBuilder.inputLabelDangerBgColor"
@@ -475,7 +482,7 @@ export default {
                     <div v-if="fillingFactors != null && sectionsOrientation == 'contiguous'" class="coilinfo-cell">
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.contiguousFillingFactor"
-                            class="text-start"
+                            class="text-left"
                             :name="'Fill. F'"
                             :subscriptName="contiguousLabel"
                             :unit="'%'"
@@ -486,10 +493,10 @@ export default {
                             :value="fillingFactors.contiguousFillingFactor"
                             :useTitleCase="false"
                             :disableShortenLabels="true"
-                            :labelWidthProportionClass="'col-7'"
-                            :valueWidthProportionClass="'col-5'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :labelWidthProportionClass="'col-4'"
+                            :valueWidthProportionClass="'col-8'"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="fillingFactors.contiguousFillingFactor < 0.8? $styleStore.magneticBuilder.inputTextColor : $styleStore.magneticBuilder.inputLabelDangerBgColor"
@@ -498,7 +505,7 @@ export default {
                     <div v-if="fillingFactors != null && sectionsOrientation == 'overlapping'" class="coilinfo-cell">
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.overlappingFillingFactor"
-                            class="text-start"
+                            class="text-left"
                             :name="'Fill. F'"
                             :subscriptName="overlappingLabel"
                             :unit="'%'"
@@ -509,10 +516,10 @@ export default {
                             :value="fillingFactors.overlappingFillingFactor"
                             :useTitleCase="false"
                             :disableShortenLabels="true"
-                            :labelWidthProportionClass="'col-7'"
-                            :valueWidthProportionClass="'col-5'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :labelWidthProportionClass="'col-4'"
+                            :valueWidthProportionClass="'col-8'"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="fillingFactors.overlappingFillingFactor < 0.8? $styleStore.magneticBuilder.inputTextColor : $styleStore.magneticBuilder.inputLabelDangerBgColor"
@@ -535,7 +542,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.ohmicLossesPerWinding"
                             v-if="outputsData.ohmicLossesPerWinding != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'P'"
                             :subscriptName="'DC'"
                             :unit="'W'"
@@ -547,8 +554,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -558,7 +565,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.skinLossesPerWinding"
                             v-if="outputsData.skinLossesPerWinding != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'P'"
                             :subscriptName="'skin'"
                             :unit="'W'"
@@ -570,8 +577,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -581,7 +588,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.proximityLossesPerWinding"
                             v-if="outputsData.proximityLossesPerWinding != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'P'"
                             :subscriptName="'prox.'"
                             :unit="'W'"
@@ -593,8 +600,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -604,7 +611,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.windingLossesPerWinding"
                             v-if="outputsData.windingLossesPerWinding != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'P'"
                             :subscriptName="'winding'"
                             :unit="'W'"
@@ -616,8 +623,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -627,7 +634,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.dcResistancePerWinding"
                             v-if="outputsData.dcResistancePerWinding != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'R'"
                             :subscriptName="'DC'"
                             :unit="'Ω'"
@@ -639,8 +646,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -650,7 +657,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.effectiveResistancePerWinding"
                             v-if="outputsData.effectiveResistancePerWinding != null"
-                            class="text-start"
+                            class="text-left"
                             :name="'R'"
                             :subscriptName="'eff'"
                             :unit="'Ω'"
@@ -662,8 +669,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -672,7 +679,7 @@ export default {
                     <div v-if="outputsData.leakageInductancePerWinding != null && selectedWindingIndex > 0" class="coilinfo-cell">
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.leakageInductanceReflectedToPrimary"
-                            class="text-start"
+                            class="text-left"
                             :name="'L'"
                             :subscriptName="'lk'"
                             :unit="'H'"
@@ -684,8 +691,8 @@ export default {
                             :labelWidthProportionClass="'col-4'"
                             :valueWidthProportionClass="'col-8'"
                             :inputStyleClass="'col-6'"
-                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                             :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -699,7 +706,7 @@ export default {
                     <DimensionReadOnly
                         v-tooltip="tooltipsMagneticBuilder.windingLosses"
                         v-if="outputsData.windingLosses != null"
-                        class="text-start ps-4 pe-4"
+                        class="text-left pl-4 pr-4"
                         :name="'Winding losses'"
                         :unit="'W'"
                         :power="1"
@@ -710,8 +717,8 @@ export default {
                         :labelWidthProportionClass="'col-7'"
                         :valueWidthProportionClass="'col-5'"
                         :inputStyleClass="'col-6'"
-                        :valueFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
-                        :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                        :valueFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
+                        :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                         :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -719,7 +726,7 @@ export default {
                     <DimensionReadOnly
                         v-tooltip="tooltipsMagneticBuilder.totalLosses"
                         v-if="outputsData.totalLosses != null"
-                        class="text-start ps-4 pe-4"
+                        class="text-left pl-4 pr-4"
                         :name="'Total losses'"
                         :unit="'W'"
                         :power="1"
@@ -730,14 +737,14 @@ export default {
                         :labelWidthProportionClass="'col-7'"
                         :valueWidthProportionClass="'col-5'"
                         :inputStyleClass="'col-6'"
-                        :valueFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
-                        :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                        :valueFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
+                        :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                         :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
                     />
                     <div
-                        v-if="masStore.mas.magnetic.coil.functionalDescription.length > 2 && !$stateStore.hasCurrentApplicationMirroredWindings()"
+                        v-if="masStore.mas.magnetic.coil.functionalDescription.length > 2 && !masStore.hasMirroredWindings"
                         class="coilinfo-winding-bar"
                     >
                         <WindingSelector
@@ -751,7 +758,7 @@ export default {
                     <DimensionReadOnly
                         v-tooltip="tooltipsMagneticBuilder.leakageInductanceReflectedToPrimary"
                         v-if="outputsData.leakageInductancePerWinding != null && masStore.mas.magnetic.coil.functionalDescription.length > 1"
-                        class="text-start ps-4 pe-4"
+                        class="text-left pl-4 pr-4"
                         :name="'Leakage Inductance'"
                         :unit="'H'"
                         :power="1"
@@ -762,8 +769,8 @@ export default {
                         :labelWidthProportionClass="'col-7'"
                         :valueWidthProportionClass="'col-5'"
                         :inputStyleClass="'col-6'"
-                        :valueFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
-                        :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                        :valueFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
+                        :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                         :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
@@ -776,12 +783,12 @@ export default {
 
 <style scoped>
 .coilinfo-panel {
-    background: linear-gradient(145deg, rgba(var(--bs-primary-rgb), 0.06) 0%, rgba(var(--bs-primary-rgb), 0.02) 100%);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
+    border: 1px solid rgba(120, 120, 120, 0.2);
     border-radius: 14px;
     padding: 0;
     margin: 0.05rem 0 0.5rem 0;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    box-shadow: 0 4px 20px rgba(var(--p-black-rgb), 0.12), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
 }
 
@@ -790,11 +797,11 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem 1rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
+    background: rgba(120, 120, 120, 0.1);
+    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
     font-weight: 600;
     font-size: 0.92rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     letter-spacing: 0.02em;
 }
 
@@ -806,7 +813,7 @@ export default {
 
 .coilinfo-header-left i {
     font-size: 1rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.35));
+    filter: drop-shadow(0 0 3px rgba(var(--p-black-rgb), 0.12));
 }
 
 .coilinfo-outdated-badge {
@@ -816,19 +823,19 @@ export default {
     letter-spacing: 0.05em;
     padding: 0.2rem 0.55rem;
     border-radius: 999px;
-    background: rgba(var(--bs-warning-rgb), 0.2);
-    color: var(--bs-warning);
-    border: 1px solid rgba(var(--bs-warning-rgb), 0.35);
+    background: rgba(var(--p-warning-rgb), 0.2);
+    color: var(--p-warning);
+    border: 1px solid rgba(var(--p-warning-rgb), 0.35);
 }
 
 .coilinfo-body {
-    padding: 0.5rem 0.4rem;
+    padding: 0.2rem 0.4rem;
 }
 
 .coilinfo-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0.1rem 0.5rem;
+    gap: 0 0.5rem;
 }
 
 @media (max-width: 576px) {
@@ -838,16 +845,56 @@ export default {
 }
 
 .coilinfo-cell {
-    background: rgba(0, 0, 0, 0.18);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    background: transparent;
+    border: 0;
     border-radius: 10px;
-    padding: 0.1rem 0.4rem 0.1rem 0.4rem;
+    padding: 0.05rem 0.4rem;
+    margin: 0;
     transition: opacity 0.3s ease;
+    line-height: 1.25;
+    font-size: 0.9rem;
 }
 
+.coilinfo-cell :deep(.row),
+.coilinfo-cell :deep(.grid),
+.coilinfo-cell :deep(.dim-ro-row),
+.coilinfo-cell :deep(.dim-ro-value-row),
+.coilinfo-cell :deep(.dim-ro-container) {
+    margin: 0 !important;
+    padding: 0 !important;
+    --p-gutter-x: 0;
+    --p-gutter-y: 0;
+    min-height: 0 !important;
+    line-height: 1.25 !important;
+}
+.coilinfo-cell :deep(.row > *),
+.coilinfo-cell :deep(.grid > *),
+.coilinfo-cell :deep(.dim-ro-row > *) {
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: 0 !important;
+    line-height: 1.25 !important;
+}
 .coilinfo-cell :deep(.form-label),
-.coilinfo-cell :deep(label) {
-    padding-left: 0.35rem !important;
+.coilinfo-cell :deep(label),
+.coilinfo-cell :deep(.dim-ro-label) {
+    padding: 0 0 0 0.35rem !important;
+    margin: 0 !important;
+    line-height: 1.25 !important;
+    text-align: start !important;
+}
+.coilinfo-cell :deep(.p-inputnumber),
+.coilinfo-cell :deep(.p-inputnumber > input),
+.coilinfo-cell :deep(.p-select),
+.coilinfo-cell :deep(.p-inputtext),
+.coilinfo-cell :deep(.dim-ro-input),
+.coilinfo-cell :deep(.dim-ro-value),
+.coilinfo-cell :deep(.dim-ro-unit) {
+    padding: 0 !important;
+    margin: 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    line-height: 1.25 !important;
 }
 
 .coilinfo-winding-bar {

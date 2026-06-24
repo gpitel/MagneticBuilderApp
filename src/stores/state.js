@@ -220,11 +220,16 @@ export const useStateStore = defineStore("state", () => {
 
     // Magnetic Builder
     const graphParameters = ref({
-        type: 'impedanceOverFrequency',
+        // NB: the key is `graph` (matches resetState() and every reader —
+        // GraphInfo.vue's `graphParameters.graph == '…'` gating and the graph
+        // components). It was mis-keyed `type` here, so on first load
+        // `graphParameters.graph` was undefined, no graph `v-if` matched, and the
+        // Graphs panel rendered empty until something called resetState().
+        graph: 'impedanceOverFrequency',
         xAxisMode: 'log',
         yAxisMode: 'log',
         minimumFrequency: 1e3,
-        maximumFrequency: 4e6,
+        maximumFrequency: 1e8,
         minimumTemperature: -40,
         maximumTemperature: 150,
         minimumDcBias: 0,
@@ -318,10 +323,6 @@ export const useStateStore = defineStore("state", () => {
         return this.selectedWizard;
     }
 
-    function hasCurrentApplicationMirroredWindings() {
-        return this.selectedApplication == SupportedApplications.CommonModeChoke || this.selectedApplication == SupportedApplications.CommonModeChokeCatalog;
-    }
-
     function selectTool(tool) {
         this.selectedTool = tool;
     }
@@ -353,7 +354,7 @@ export const useStateStore = defineStore("state", () => {
             xAxisMode: 'log',
             yAxisMode: 'log',
             minimumFrequency: 1e3,
-            maximumFrequency: 4e6,
+            maximumFrequency: 1e8,
             numberPoints: 100,
         };
 
@@ -430,7 +431,6 @@ export const useStateStore = defineStore("state", () => {
         selectApplication,
         selectedApplication,
         getCurrentApplication,
-        hasCurrentApplicationMirroredWindings,
         SupportedApplications,
         updatedSignals,
         resetMagneticTool,

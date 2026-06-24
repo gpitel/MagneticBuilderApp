@@ -33,7 +33,7 @@ export default {
                 x: [0, 1],
                 y: [0, 1],
             },
-            colorLabel: '#b18aea',
+            colorLabel: getComputedStyle(document.documentElement).getPropertyValue('--p-primary').trim() || 'var(--p-primary)',
             type: 'log', // log or value
             position: 'left',
             unit: 'W',
@@ -44,14 +44,14 @@ export default {
                 x: [0, 1],
                 y: [0, 1],
             },
-            colorLabel: '#00b6ff',
+            colorLabel: getComputedStyle(document.documentElement).getPropertyValue('--p-dark').trim() ,
             type: 'log', // log or value
             position: 'right',
             unit: 'W',
         }]
         const frequencyData = {
             label: 'Frequency',
-            colorLabel: '#d4d4d4',
+            colorLabel: getComputedStyle(document.documentElement).getPropertyValue('--p-secondary').trim() || 'var(--p-secondary)',
             type: 'log', // log or value
             unit: 'Hz',
         }
@@ -191,13 +191,13 @@ export default {
 
 <template>
     <div class="graph-wrapper">
-        <div class="row g-3">
-            <div class="col-12 col-md-3">
+        <div class="grid">
+            <div class="col-12 md:col-3">
                 <div class="graph-params">
                     <slot/>
                 </div>
             </div>
-            <div class="col-12 col-md-9 graph-viz-col">
+            <div class="col-12 md:col-9 graph-viz-col">
                 <img :data-cy="dataTestLabel + '-CoreLossesOverFrequency-loading'" v-if="loading" class="mx-auto d-block graph-loading" alt="loading" :src="$settingsStore.loadingGif">
                 <LineVisualizer 
                     v-show="!loading"
@@ -207,6 +207,8 @@ export default {
                     :forceUpdate="forceUpdate"
                     :bgColor="$styleStore.magneticBuilder.graphBgColor['background-color']"
                     :lineColor="$styleStore.magneticBuilder.graphLineColor.color"
+                    :showPoints="false"
+                    :tooltipTrigger="'axis'"
                     :pointsColor="$styleStore.magneticBuilder.graphPointsColor.color"
                     :textColor="$styleStore.magneticBuilder.inputTextColor.color"
                 />
@@ -221,8 +223,8 @@ export default {
 }
 
 .graph-params {
-    background: rgba(var(--bs-light-rgb), 0.04);
-    border: 1px solid rgba(var(--bs-light-rgb), 0.1);
+    background: rgba(var(--p-white-rgb), 0.04);
+    border: 1px solid rgba(var(--p-white-rgb), 0.1);
     border-radius: 12px;
     padding: 0.6rem 0.55rem;
     display: flex;

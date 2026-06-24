@@ -19,7 +19,7 @@ import Text from '/WebSharedComponents/DataInput/Text.vue'
 import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
 import DimensionWithTolerance from '/WebSharedComponents/DataInput/DimensionWithTolerance.vue'
-import { MaterialEnum, MaterialComposition } from '/WebSharedComponents/assets/ts/MAS.ts'
+import { MaterialType as MaterialEnum, MaterialComposition } from '/WebSharedComponents/assets/ts/MAS.ts'
 import ContextMenu from '../../ContextMenu.vue'
 import { useMagneticBuilderSettingsStore } from '../../../../stores/magneticBuilderSettings'
 import { useTaskQueueStore } from '../../../../stores/taskQueue'
@@ -59,8 +59,11 @@ export default {
                     if (args[0]) {
                         const coreMaterial = args[1];
                         this.core.functionalDescription.material = coreMaterial;
-                        this.loadAdvancedMaterialData();
-
+                        // Do not call loadAdvancedMaterialData() — that would re-trigger
+                        // processCoreMaterial and loop. Just load complex permeability if needed.
+                        if (coreMaterial.permeability != null && coreMaterial.permeability.complex == null) {
+                            this.loadMaterialComplexPermeabilityData();
+                        }
                     }
                     else {
                         console.error(args[1]);
@@ -200,40 +203,9 @@ export default {
                 return;
             }
 
-            const url = import.meta.env.VITE_API_ENDPOINT + '/read_advanced_core_material_by_name'
-            const data = {
-                "name": material.name
-            }
-            console.log('[AdvancedCoreSelectorMaterial] Fetching from API for material:', material.name);
-            this.$axios.post(url, data)
-            .then(response => {
-                console.log('[AdvancedCoreSelectorMaterial] API response:', response.data);
-                console.log('[AdvancedCoreSelectorMaterial] API bhCycle:', response.data.bhCycle);
-                console.log('[AdvancedCoreSelectorMaterial] API volumetricLosses:', response.data.volumetricLosses);
-
-                if (response.data.bhCycle != null && response.data.bhCycle.length > 0) {
-                    material.bhCycle = response.data.bhCycle;
-                    console.log('[AdvancedCoreSelectorMaterial] Set bhCycle:', material.bhCycle);
-                }
-                if (response.data.volumetricLosses != null) {
-                    Object.keys(response.data.volumetricLosses).forEach((key) => {
-                        response.data.volumetricLosses[key].forEach((method) => {
-                            material.volumetricLosses[key].push(method)
-                        })
-                    })
-                    console.log('[AdvancedCoreSelectorMaterial] Updated volumetricLosses:', material.volumetricLosses);
-                }
-                if (response.data.permeability != null && response.data.permeability.amplitude != null) {
-                    material.permeability.amplitude = response.data.permeability.amplitude;
-                }
-
-                if (material.permeability.complex == null) {
-                    this.loadMaterialComplexPermeabilityData();
-                }
-            })
-            .catch(error => {
-                console.error('[AdvancedCoreSelectorMaterial] API error:', error);
-            });
+            // Use MKF WASM to load full material data (no backend required)
+            console.log('[AdvancedCoreSelectorMaterial] Fetching via MKF WASM for material:', material.name);
+            this.taskQueueStore.processCoreMaterial(material.name);
         },
         loadMaterialData() {
             this.taskQueueStore.processCoreMaterial(this.core.functionalDescription.material);
@@ -271,18 +243,18 @@ export default {
                     </div>
                 </div>
             </div>
-            <div class="col-sm-12 col-md-4">
+            <div class="col-12 md:col-4">
                 <div>
                     <Text
                         v-if="core.functionalDescription.material.name != null"
-                        class="col-11 offset-1 mb-1 text-start"
+                        class="col-11 col-offset-1 mb-1 text-left"
                         :name="'name'"
                         v-model="core.functionalDescription.material"
                         :defaultValue="'Material name'"
                         :dataTestLabel="dataTestLabel + '-MaterialName'"
                         :canBeEmpty="false"
-                        :labelWidthProportionClass="'col-sm-12 col-md-6'"
-                        :valueWidthProportionClass="'col-sm-12 col-md-6'"
+                        :labelWidthProportionClass="'col-12 md:col-6'"
+                        :valueWidthProportionClass="'col-12 md:col-6'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -291,14 +263,14 @@ export default {
                     />
                     <Text
                         v-if="core.functionalDescription.material.family != null"
-                        class="col-11 offset-1 mb-1 text-start"
+                        class="col-11 col-offset-1 mb-1 text-left"
                         :name="'family'"
                         v-model="core.functionalDescription.material"
                         :defaultValue="'Material Family'"
                         :dataTestLabel="dataTestLabel + '-MaterialFamily'"
                         :canBeEmpty="false"
-                        :labelWidthProportionClass="'col-sm-12 col-md-6'"
-                        :valueWidthProportionClass="'col-sm-12 col-md-6'"
+                        :labelWidthProportionClass="'col-12 md:col-6'"
+                        :valueWidthProportionClass="'col-12 md:col-6'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -307,15 +279,15 @@ export default {
                     />
                     <Text
                         v-if="core.functionalDescription.material.manufacturerInfo != null && core.functionalDescription.material.manufacturerInfo.name != null"
-                        class="col-11 offset-1 mb-1 text-start"
+                        class="col-11 col-offset-1 mb-1 text-left"
                         :name="'name'"
                         :replaceTitle="'Manufacturer'"
                         v-model="core.functionalDescription.material.manufacturerInfo"
                         :defaultValue="'Manufacturer name'"
                         :dataTestLabel="dataTestLabel + '-MaterialName'"
                         :canBeEmpty="false"
-                        :labelWidthProportionClass="'col-sm-12 col-md-6'"
-                        :valueWidthProportionClass="'col-sm-12 col-md-6'"
+                        :labelWidthProportionClass="'col-12 md:col-6'"
+                        :valueWidthProportionClass="'col-12 md:col-6'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -326,7 +298,7 @@ export default {
                         v-if="core.functionalDescription.material.curieTemperature != null"
                         :name="'curieTemperature'"
                         :unit="'°C'"
-                        class="col-11 offset-1 ms-3 ps-1 mb-1 text-start"
+                        class="col-11 col-offset-1 ml-3 pl-1 mb-1 text-left"
                         :dataTestLabel="dataTestLabel + '-CurieTemperature'"
                         :justifyContent="true"
                         :allowNegative="true"
@@ -334,8 +306,8 @@ export default {
                         :min="1"
                         :max="1000"
                         :modelValue="core.functionalDescription.material"
-                        :labelWidthProportionClass="'col-sm-12 col-md-6'"
-                        :valueWidthProportionClass="'col-sm-12 col-md-6'"
+                        :labelWidthProportionClass="'col-12 md:col-6'"
+                        :valueWidthProportionClass="'col-12 md:col-6'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -346,7 +318,7 @@ export default {
                         v-if="core.functionalDescription.material.density != null"
                         :name="'density'"
                         :unit="'g/m³'"
-                        class="col-11 offset-1 ms-3 ps-1 mb-1 text-start"
+                        class="col-11 col-offset-1 ml-3 pl-1 mb-1 text-left"
                         :dataTestLabel="dataTestLabel + '-Density'"
                         :justifyContent="true"
                         :allowNegative="true"
@@ -354,8 +326,8 @@ export default {
                         :min="1"
                         :max="1000"
                         :modelValue="core.functionalDescription.material"
-                        :labelWidthProportionClass="'col-sm-12 col-md-6'"
-                        :valueWidthProportionClass="'col-sm-12 col-md-6'"
+                        :labelWidthProportionClass="'col-12 md:col-6'"
+                        :valueWidthProportionClass="'col-12 md:col-6'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -364,15 +336,15 @@ export default {
                     />
                     <ElementFromList
                         v-if="core.functionalDescription.material.material != null"
-                        class="col-10 offset-1 ms-3 ps-1 mb-1 text-start"
+                        class="col-10 col-offset-1 ml-3 pl-1 mb-1 text-left"
                         :dataTestLabel="dataTestLabel + '-Material'"
                         :name="'material'"
                         :titleSameRow="true"
                         :justifyContent="true"
                         v-model="core.functionalDescription.material"
                         :options="materialEnumInversed"
-                        :labelWidthProportionClass="'col-sm-12 col-md-5'"
-                        :valueWidthProportionClass="'col-sm-12 col-md-7'"
+                        :labelWidthProportionClass="'col-12 md:col-5'"
+                        :valueWidthProportionClass="'col-12 md:col-7'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -381,7 +353,7 @@ export default {
                     />
                     <ElementFromList
                         v-if="core.functionalDescription.material.materialComposition != null"
-                        class="col-10 offset-1 ms-3 ps-1 mb-1 text-start"
+                        class="col-10 col-offset-1 ml-3 pl-1 mb-1 text-left"
                         :dataTestLabel="dataTestLabel + '-MaterialComposition'"
                         :name="'materialComposition'"
                         :replaceTitle="'Material Comp.'"
@@ -389,15 +361,15 @@ export default {
                         :justifyContent="true"
                         v-model="core.functionalDescription.material"
                         :options="materialCompositionInversed"
-                        :labelWidthProportionClass="'col-sm-12 col-md-5'"
-                        :valueWidthProportionClass="'col-sm-12 col-md-7'"
+                        :labelWidthProportionClass="'col-12 md:col-5'"
+                        :valueWidthProportionClass="'col-12 md:col-7'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                         :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
                     />
-                    <DimensionWithTolerance class="border-bottom py-2 ps-2"
+                    <DimensionWithTolerance class="border-bottom py-2 pl-2"
                         v-if="core.functionalDescription.material.heatCapacity != null"
                         :name="'heatCapacity'"
                         unit="J/Kg/K"
@@ -407,7 +379,7 @@ export default {
                         :max="1000000"
                         v-model="core.functionalDescription.material.heatCapacity"
                         :severalRows="true"
-                        :unitExtraStyleClass="'py-1 ps-1 mt-1'"
+                        :unitExtraStyleClass="'py-1 pl-1 mt-1'"
                         :addButtonStyle="$styleStore.magneticBuilder.requirementButton"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :titleFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
@@ -415,7 +387,7 @@ export default {
                         :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
                     />
-                    <DimensionWithTolerance class="border-bottom py-2 ps-2"
+                    <DimensionWithTolerance class="border-bottom py-2 pl-2"
                         v-if="core.functionalDescription.material.heatConductivity != null"
                         :name="'heatConductivity'"
                         unit="W/m/K"
@@ -425,7 +397,7 @@ export default {
                         :max="1000"
                         v-model="core.functionalDescription.material.heatConductivity"
                         :severalRows="true"
-                        :unitExtraStyleClass="'py-1 ps-1 mt-1'"
+                        :unitExtraStyleClass="'py-1 pl-1 mt-1'"
                         :addButtonStyle="$styleStore.magneticBuilder.requirementButton"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :titleFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
@@ -463,7 +435,7 @@ export default {
                     </div>
                 </div>
             </div>
-            <div class="col-sm-12 col-md-4">
+            <div class="col-12 md:col-4">
                 <InitialPermeabilityVersusTemperature
                     v-if="core.functionalDescription.material.permeability != null && !isInitialPermeabilityEquationBased"
                     :dataTestLabel="dataTestLabel + '-InitialPermeabilityVersusTemperature'"
@@ -507,7 +479,7 @@ export default {
                     :chartStyle="'height: 19vh'"
                 />
             </div>
-            <div class="col-sm-12 col-md-4">
+            <div class="col-12 md:col-4">
                 <BhCyclePerTemperature
                     v-if="core.functionalDescription.material.bhCycle != null"
                     :dataTestLabel="dataTestLabel + '-BhCyclePerTemperature'"

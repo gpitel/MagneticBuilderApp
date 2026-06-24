@@ -286,7 +286,7 @@ export default {
         <div class="wire-config-panel">
             <div class="wire-config-header">
                 <div class="wire-config-header-left">
-                    <i class="fa-solid fa-bolt"></i>
+                    <i class="pi pi-bolt"></i>
                     <span>Wire Configuration</span>
                 </div>
                 <div v-if="enableAdvise && enableSubmenu && !readOnly" class="wire-config-header-right">
@@ -298,7 +298,7 @@ export default {
                         class="wire-config-header-btn wire-config-header-btn-primary"
                         @click="adviseWireRequested"
                     >
-                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <i class="pi pi-sparkles"></i>
                         <span>Advise</span>
                     </button>
                     <button
@@ -309,7 +309,7 @@ export default {
                         class="wire-config-header-btn wire-config-header-btn-primary"
                         @click="adviseAllWiresRequested"
                     >
-                        <i class="fa-solid fa-wand-sparkles"></i>
+                        <i class="pi pi-sparkles"></i>
                         <span>Advise all</span>
                     </button>
                     <button
@@ -320,7 +320,7 @@ export default {
                         class="wire-config-header-btn wire-config-header-btn-primary"
                         @click="adviseWireRequested"
                     >
-                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <i class="pi pi-sparkles"></i>
                         <span>Advise</span>
                     </button>
                 </div>
@@ -341,11 +341,11 @@ export default {
                         :operatingPoint="masStore.mas.inputs.operatingPoints[operatingPointIndex]"
                         :includeCurrentDensity="false"
                         :loadingGif="$settingsStore.loadingGif"
-                        :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || '#1a1a1a'"
+                        :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || 'var(--p-dark)'"
                     />
                 </div>
                 <div
-                    v-if="!$stateStore.hasCurrentApplicationMirroredWindings()"
+                    v-if="!masStore.hasMirroredWindings"
                     class="wire-config-winding-bar"
                 >
                     <WindingSelector
@@ -369,7 +369,7 @@ export default {
                     <ElementFromList
                         v-tooltip="tooltipsMagneticBuilder.wireRectangularConductingHeight"
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :dataTestLabel="dataTestLabel + '-WireThickness'"
                             :replaceTitle="'Cond. diameter'"
                             :name="'wireThickness'"
@@ -388,7 +388,7 @@ export default {
                         />
                     </div>
                     <div v-if="!loading" class="wire-config-cell wire-config-cell-wide">
-                        <Dimension class="text-start"
+                        <Dimension class="text-left"
                             v-tooltip="tooltipsMagneticBuilder.wireRectangularConductingWidth"
                             :disabled="readOnly"
                             :name="'wireWidth'"
@@ -401,7 +401,7 @@ export default {
                             :allowNegative="false"
                             :modelValue="localData"
                             :forceUpdate="forceUpdate"
-                            :styleClassInput="'offset-3 col-6'"
+                            :styleClassInput="'col-offset-3 col-6'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -425,7 +425,7 @@ export default {
 
                 <BasicWireSubmenu
                     v-if="enableSubmenu && !readOnly"
-                    class="col-12 mb-1 text-start"
+                    class="col-12 mb-1 text-left"
                     :dataTestLabel="dataTestLabel + '-BasicWireSubmenu'"
                     :enableCustomize="false"
                     @customizeCore="customizeWire"
@@ -440,12 +440,12 @@ export default {
 
 <style scoped>
 .wire-config-panel {
-    background: linear-gradient(145deg, rgba(var(--bs-primary-rgb), 0.06) 0%, rgba(var(--bs-primary-rgb), 0.02) 100%);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
+    border: 1px solid rgba(120, 120, 120, 0.2);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.25rem 0;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    box-shadow: 0 4px 20px rgba(var(--p-black-rgb), 0.12), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
 }
 
@@ -454,11 +454,11 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.6rem 0.9rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
+    background: rgba(120, 120, 120, 0.1);
+    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
     font-weight: 600;
     font-size: 0.9rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     letter-spacing: 0.02em;
 }
 
@@ -470,7 +470,7 @@ export default {
 
 .wire-config-header-left i {
     font-size: 0.95rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.35));
+    filter: drop-shadow(0 0 3px rgba(var(--p-black-rgb), 0.12));
 }
 
 .wire-config-header-right {
@@ -506,16 +506,16 @@ export default {
 
 .wire-config-header-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .wire-config-body {
@@ -526,7 +526,7 @@ export default {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.15rem;
-    background: var(--bs-dark);
+    background: var(--p-dark);
     border-radius: 10px;
     padding: 0.35rem;
 }

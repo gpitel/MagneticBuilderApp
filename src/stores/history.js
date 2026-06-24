@@ -36,6 +36,14 @@ export const useHistoryStore = defineStore("history", () => {
         if (blockingAdditions) {
             return
         }
+        // A state identical to the current entry is a rebound echo (e.g. the
+        // mas watcher firing after back()/forward() restored it), not an edit.
+        // Comparing content makes the suppression deterministic instead of
+        // relying solely on the 100ms timer window below.
+        if (this.historyPointer >= 0 &&
+            JSON.stringify(this.masHistory[this.historyPointer]) === JSON.stringify(mas)) {
+            return
+        }
         // Discard any redo entries beyond the current pointer
         if (this.historyPointer < this.masHistory.length - 1) {
             this.masHistory.length = this.historyPointer + 1;

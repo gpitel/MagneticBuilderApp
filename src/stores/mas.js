@@ -44,9 +44,14 @@ export const useMasStore = defineStore("mas", () => {
         console.log("Resetting MAS")
     }
 
+    const hasMirroredWindings = computed(() =>
+        mas.value?.inputs?.designRequirements?.topology === 'commonModeChoke'
+    );
+
     return {
         setMas,
         mas,
+        hasMirroredWindings,
         resetMas,
         coreAdviserWeights,
         importedMas,

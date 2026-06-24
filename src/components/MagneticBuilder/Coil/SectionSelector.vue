@@ -111,17 +111,17 @@ export default {
     flex-wrap: wrap;
     gap: 0.4rem;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.25);
+    background: rgba(var(--p-black-rgb), 0.25);
     padding: 0.35rem;
     border-radius: 999px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(var(--p-white-rgb), 0.06);
 }
 
 .section-pill {
     appearance: none;
     border: none;
     background: transparent;
-    color: rgba(255, 255, 255, 0.65);
+    color: rgba(var(--p-white-rgb), 0.65);
     font-size: 0.78rem;
     font-weight: 600;
     padding: 0.35rem 0.85rem;
@@ -132,13 +132,13 @@ export default {
 }
 
 .section-pill:hover {
-    color: rgba(255, 255, 255, 0.9);
-    background: rgba(255, 255, 255, 0.06);
+    color: rgba(var(--p-white-rgb), 0.9);
+    background: rgba(var(--p-white-rgb), 0.06);
 }
 
 .section-pill.active {
-    background: linear-gradient(135deg, rgba(var(--bs-primary-rgb), 0.9) 0%, rgba(var(--bs-primary-rgb), 0.7) 100%);
-    color: #fff;
-    box-shadow: 0 2px 8px rgba(var(--bs-primary-rgb), 0.35);
+    background: linear-gradient(135deg, rgba(var(--p-primary-rgb), 0.9) 0%, rgba(var(--p-primary-rgb), 0.7) 100%);
+    color: var(--p-white);
+    box-shadow: 0 2px 8px rgba(var(--p-primary-rgb), 0.35);
 }
 </style>

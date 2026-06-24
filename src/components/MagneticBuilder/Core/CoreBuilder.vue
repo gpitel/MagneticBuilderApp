@@ -33,6 +33,10 @@ export default {
             type: Boolean,
             default: true,
         },
+        enableCustomize: {
+            type: Boolean,
+            default: true,
+        },
         enableAdvise: {
             type: Boolean,
             default: true,
@@ -136,6 +140,7 @@ export default {
                 :enableSimulation="enableSimulation"
                 :enableAutoSimulation="enableAutoSimulation"
                 :enableSubmenu="enableSubmenu"
+                :enableCustomize="enableCustomize"
                 :enableAdvise="enableAdvise"
                 :useVisualizers="useVisualizers"
                 :forceUpdateVisualizer="forceUpdateCore3DVisualizer"

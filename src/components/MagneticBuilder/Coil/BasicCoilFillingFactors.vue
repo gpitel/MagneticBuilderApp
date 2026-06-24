@@ -62,7 +62,7 @@ export default {
     <div class="filling-panel">
         <div class="filling-header">
             <div class="filling-header-left">
-                <i class="fa-solid fa-gauge-high"></i>
+                <i class="pi pi-gauge"></i>
                 <span>Filling Factors</span>
             </div>
         </div>
@@ -71,7 +71,7 @@ export default {
                 <div class="filling-cell">
                     <DimensionReadOnly 
                         v-tooltip="tooltipsMagneticBuilder.areaFillingFactor"
-                        class="text-start"
+                        class="text-left"
                         :name="'Fill. F'"
                         :subscriptName="'area'"
                         :unit="'%'"
@@ -82,8 +82,8 @@ export default {
                         :value="data.fillingFactors.areaFillingFactor"
                         :useTitleCase="false"
                         :disableShortenLabels="true"
-                        :labelWidthProportionClass="'col-6'"
-                        :valueWidthProportionClass="'col-6'"
+                        :labelWidthProportionClass="'col-4'"
+                        :valueWidthProportionClass="'col-8'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -94,7 +94,7 @@ export default {
                 <div v-if="data.sectionsOrientation == 'contiguous'" class="filling-cell">
                     <DimensionReadOnly 
                         v-tooltip="tooltipsMagneticBuilder.contiguousFillingFactor"
-                        class="text-start"
+                        class="text-left"
                         :name="'Fill. F'"
                         :subscriptName="contiguousLabel"
                         :unit="'%'"
@@ -105,8 +105,8 @@ export default {
                         :value="data.fillingFactors.contiguousFillingFactor"
                         :useTitleCase="false"
                         :disableShortenLabels="true"
-                        :labelWidthProportionClass="'col-7'"
-                        :valueWidthProportionClass="'col-5'"
+                        :labelWidthProportionClass="'col-4'"
+                        :valueWidthProportionClass="'col-8'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -117,7 +117,7 @@ export default {
                 <div v-if="data.sectionsOrientation == 'overlapping'" class="filling-cell">
                     <DimensionReadOnly 
                         v-tooltip="tooltipsMagneticBuilder.overlappingFillingFactor"
-                        class="text-start"
+                        class="text-left"
                         :name="'Fill. F'"
                         :subscriptName="overlappingLabel"
                         :unit="'%'"
@@ -128,8 +128,8 @@ export default {
                         :value="data.fillingFactors.overlappingFillingFactor"
                         :useTitleCase="false"
                         :disableShortenLabels="true"
-                        :labelWidthProportionClass="'col-7'"
-                        :valueWidthProportionClass="'col-5'"
+                        :labelWidthProportionClass="'col-4'"
+                        :valueWidthProportionClass="'col-8'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -144,12 +144,12 @@ export default {
 
 <style scoped>
 .filling-panel {
-    background: linear-gradient(145deg, rgba(var(--bs-primary-rgb), 0.06) 0%, rgba(var(--bs-primary-rgb), 0.02) 100%);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
+    border: 1px solid rgba(120, 120, 120, 0.2);
     border-radius: 14px;
     padding: 0;
     margin: 0.5rem 0 1rem 0;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    box-shadow: 0 4px 20px rgba(var(--p-black-rgb), 0.12), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
 }
 
@@ -158,11 +158,11 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem 1rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
+    background: rgba(120, 120, 120, 0.1);
+    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
     font-weight: 600;
     font-size: 0.92rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     letter-spacing: 0.02em;
 }
 
@@ -174,7 +174,7 @@ export default {
 
 .filling-header-left i {
     font-size: 1rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.35));
+    filter: drop-shadow(0 0 3px rgba(var(--p-black-rgb), 0.12));
 }
 
 .filling-body {
@@ -194,8 +194,8 @@ export default {
 }
 
 .filling-cell {
-    background: rgba(0, 0, 0, 0.18);
-    border: 1px solid rgba(255, 255, 255, 0.04);
+    background: rgba(var(--p-black-rgb), 0.18);
+    border: 1px solid rgba(var(--p-white-rgb), 0.04);
     border-radius: 10px;
     padding: 0.5rem 0.6rem;
 }

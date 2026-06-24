@@ -421,7 +421,20 @@ export default {
                     // Only update coil and trigger actions if not blocked
                     if (!this.taskQueueStore.windingIndexChangeBlock) {
                         this.masStore.mas.magnetic.coil.functionalDescription = coil.functionalDescription;
-                        this.cleanCoil();
+                        // Preserve sections/turns layout from adviser (e.g. CMC spacers); only wipe if absent
+                        if (coil.sectionsDescription) {
+                            this.masStore.mas.magnetic.coil.sectionsDescription = coil.sectionsDescription;
+                            this.masStore.mas.magnetic.coil.turnsDescription = coil.turnsDescription ?? null;
+                            // Propagate bobbin sectionsOrientation so subsequent wind() calls
+                            // inherit CONTIGUOUS for CMC toroids instead of resetting to OVERLAPPING
+                            const srcWw = coil.bobbin?.processedDescription?.windingWindows?.[0];
+                            const dstWw = this.masStore.mas.magnetic.coil.bobbin?.processedDescription?.windingWindows?.[0];
+                            if (srcWw?.sectionsOrientation && dstWw) {
+                                dstWw.sectionsOrientation = srcWw.sectionsOrientation;
+                            }
+                        } else {
+                            this.cleanCoil();
+                        }
                         this.$emit("wireUpdated", this.windingIndex);
 
                         this.$stateStore.wire2DVisualizerState.plotCurrentViews = {};
@@ -465,7 +478,13 @@ export default {
                     // Only update coil and trigger actions if not blocked
                     if (!this.taskQueueStore.windingIndexChangeBlock) {
                         this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex] = winding;
-                        this.cleanCoil();
+                        // Preserve sections/turns layout from adviser (e.g. CMC spacers); only wipe if absent
+                        if (result.coil?.sectionsDescription) {
+                            this.masStore.mas.magnetic.coil.sectionsDescription = result.coil.sectionsDescription;
+                            this.masStore.mas.magnetic.coil.turnsDescription = result.coil.turnsDescription ?? null;
+                        } else {
+                            this.cleanCoil();
+                        }
                         this.$emit("wireUpdated", this.windingIndex);
 
                         this.$stateStore.wire2DVisualizerState.plotCurrentViews[this.windingIndex] = null;
@@ -497,10 +516,13 @@ export default {
 
 <template>
     <div class="container">
-        <div class="wire-config-panel">
+        <div
+            class="wire-config-panel"
+            :style="{ '--wire-config-value-font-size': $styleStore.magneticBuilder.inputFontSize?.['font-size'] ?? $styleStore.magneticBuilder.inputFontSize?.fontSize }"
+        >
             <div class="wire-config-header">
                 <div class="wire-config-header-left">
-                    <i class="fa-solid fa-bolt"></i>
+                    <i class="pi pi-bolt"></i>
                     <span>Wire Configuration</span>
                 </div>
                 <div v-if="enableAdvise && enableSubmenu && !readOnly" class="wire-config-header-right">
@@ -513,7 +535,7 @@ export default {
                         v-tooltip="isCurrentWireIncomplete ? 'Wire not configured for this winding — click to get a recommendation' : 'Get a recommended wire for this winding'"
                         @click="adviseWireRequested"
                     >
-                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <i class="pi pi-sparkles"></i>
                         <span>Advise</span>
                     </button>
                     <button
@@ -525,7 +547,7 @@ export default {
                         v-tooltip="anyWireIncomplete ? 'Some wires are not configured — click to get a recommendation for every winding' : 'Get a recommendation for every winding'"
                         @click="adviseAllWiresRequested"
                     >
-                        <i class="fa-solid fa-wand-sparkles"></i>
+                        <i class="pi pi-sparkles"></i>
                         <span>Advise all</span>
                     </button>
                     <button
@@ -537,7 +559,7 @@ export default {
                         v-tooltip="isCurrentWireIncomplete ? 'Wire not configured — click to get a recommendation' : 'Get a recommended wire'"
                         @click="adviseWireRequested"
                     >
-                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <i class="pi pi-sparkles"></i>
                         <span>Advise</span>
                     </button>
                 </div>
@@ -559,11 +581,11 @@ export default {
                         :operatingPoint="masStore.mas.inputs.operatingPoints[operatingPointIndex]"
                         :includeCurrentDensity="false"
                         :loadingGif="$settingsStore.loadingGif"
-                        :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || '#1a1a1a'"
+                        :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || 'var(--p-dark)'"
                     />
                 </div>
                 <div
-                    v-if="!$stateStore.hasCurrentApplicationMirroredWindings()"
+                    v-if="!masStore.hasMirroredWindings"
                     class="wire-config-winding-bar"
                 >
                     <WindingSelector
@@ -595,15 +617,15 @@ export default {
                     <ElementFromList
                         v-tooltip="tooltipsMagneticBuilder.wireType"
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :dataTestLabel="dataTestLabel + '-WireType'"
                             :name="'type'"
                             :titleSameRow="true"
                             :justifyContent="true"
                             v-model="localData"
                             :options="wireTypes"
-                            :labelWidthProportionClass="'col-5'"
-                            :selectStyleClass="'col-7'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :selectStyleClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -618,13 +640,13 @@ export default {
                         <ElementFromList
                             v-tooltip="tooltipsMagneticBuilder.wireStandard"
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :dataTestLabel="dataTestLabel + '-WireStandard'"
                             :name="'standard'"
                             :titleSameRow="true"
                             :justifyContent="true"
-                            :labelWidthProportionClass="'col-3'"
-                            :selectStyleClass="'col-9'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :selectStyleClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -639,14 +661,14 @@ export default {
                         <ElementFromList
                             v-tooltip="tooltipsMagneticBuilder.wireRoundConductingDiameter"
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :dataTestLabel="dataTestLabel + '-WireConductingDiameter'"
                             :replaceTitle="'Cond. diameter'"
                             :name="'roundConductingDiameter'"
                             :titleSameRow="true"
                             :justifyContent="true"
-                            :labelWidthProportionClass="'col-5'"
-                            :selectStyleClass="'col-7'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :selectStyleClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -661,12 +683,12 @@ export default {
                         <ElementFromList
                             v-tooltip="tooltipsMagneticBuilder.wireLitzStrandConductingDiameter"
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :dataTestLabel="dataTestLabel + '-StrandConductingDiameter'"
                             :replaceTitle="'Cond. diameter'"
                             :name="'litzStrandConductingDiameter'"
-                            :labelWidthProportionClass="'col-6'"
-                            :selectStyleClass="'col-6'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :selectStyleClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -683,13 +705,13 @@ export default {
                         <ElementFromList
                             v-tooltip="tooltipsMagneticBuilder.wireCoating"
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :dataTestLabel="dataTestLabel + '-WireCoating'"
                             :name="'coating'"
                             :titleSameRow="true"
                             :justifyContent="true"
-                            :labelWidthProportionClass="'col-3'"
-                            :selectStyleClass="'col-9'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :selectStyleClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -701,7 +723,7 @@ export default {
                         />
                     </div>
                     <div v-if="!loading && localData.type == 'litz'" class="wire-config-cell wire-config-cell-wide">
-                        <Dimension class="text-start"
+                        <Dimension class="text-left"
                             v-tooltip="tooltipsMagneticBuilder.wireLitzNumberConductors"
                             :disabled="readOnly"
                             :name="'numberConductors'"
@@ -714,8 +736,8 @@ export default {
                             :allowNegative="false"
                             :modelValue="localData"
                             :forceUpdate="forceUpdate"
-                            :labelWidthProportionClass="'col-xs-12 col-md-7'"
-                            :valueWidthProportionClass="'col-xs-8 col-md-5'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :valueWidthProportionClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -724,8 +746,8 @@ export default {
                             @update="wireUpdated"
                         />
                     </div>
-                    <div v-if="!loading && localData.type == 'rectangular'" class="wire-config-cell">
-                        <Dimension class="text-start"
+                    <div v-if="!loading && localData.type == 'rectangular'" class="wire-config-cell wire-config-cell-wide">
+                        <Dimension class="text-left"
                             v-tooltip="tooltipsMagneticBuilder.wireRectangularConductingHeight"
                             :disabled="readOnly"
                             :name="'rectangularConductingHeight'"
@@ -738,7 +760,8 @@ export default {
                             :allowNegative="false"
                             :modelValue="localData"
                             :forceUpdate="forceUpdate"
-                            :styleClassInput="'offset-3 col-6'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :valueWidthProportionClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -747,8 +770,8 @@ export default {
                             @update="wireUpdated"
                         />
                     </div>
-                    <div v-if="!loading && localData.type == 'rectangular'" class="wire-config-cell">
-                        <Dimension class="text-start"
+                    <div v-if="!loading && localData.type == 'rectangular'" class="wire-config-cell wire-config-cell-wide">
+                        <Dimension class="text-left"
                             v-tooltip="tooltipsMagneticBuilder.wireRectangularConductingWidth"
                             :disabled="readOnly"
                             :name="'rectangularConductingWidth'"
@@ -761,7 +784,8 @@ export default {
                             :allowNegative="false"
                             :modelValue="localData"
                             :forceUpdate="forceUpdate"
-                            :styleClassInput="'offset-3 col-6'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :valueWidthProportionClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -770,8 +794,8 @@ export default {
                             @update="wireUpdated"
                         />
                     </div>
-                    <div v-if="!loading && localData.type == 'foil'" class="wire-config-cell">
-                        <Dimension class="text-start"
+                    <div v-if="!loading && localData.type == 'foil'" class="wire-config-cell wire-config-cell-wide">
+                        <Dimension class="text-left"
                             v-tooltip="tooltipsMagneticBuilder.wireFoilConductingHeight"
                             :disabled="readOnly"
                             :name="'foilConductingHeight'"
@@ -784,7 +808,8 @@ export default {
                             :allowNegative="false"
                             :modelValue="localData"
                             :forceUpdate="forceUpdate"
-                            :styleClassInput="'offset-3 col-6'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :valueWidthProportionClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -793,8 +818,8 @@ export default {
                             @update="wireUpdated"
                         />
                     </div>
-                    <div v-if="!loading && localData.type == 'foil'" class="wire-config-cell">
-                        <Dimension class="text-start"
+                    <div v-if="!loading && localData.type == 'foil'" class="wire-config-cell wire-config-cell-wide">
+                        <Dimension class="text-left"
                             v-tooltip="tooltipsMagneticBuilder.wireFoilConductingWidth"
                             :disabled="readOnly"
                             :name="'foilConductingWidth'"
@@ -807,7 +832,8 @@ export default {
                             :allowNegative="false"
                             :modelValue="localData"
                             :forceUpdate="forceUpdate"
-                            :styleClassInput="'offset-3 col-6'"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :valueWidthProportionClass="'col-12 md:col-7'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -831,7 +857,7 @@ export default {
 
                 <BasicWireSubmenu
                     v-if="enableSubmenu && !readOnly"
-                    class="col-12 mb-1 text-start"
+                    class="col-12 mb-1 text-left"
                     :dataTestLabel="dataTestLabel + '-BasicWireSubmenu'"
                     :enableCustomize="false"
                     @customizeCore="customizeWire"
@@ -846,12 +872,12 @@ export default {
 
 <style scoped>
 .wire-config-panel {
-    background: linear-gradient(145deg, rgba(var(--bs-primary-rgb), 0.06) 0%, rgba(var(--bs-primary-rgb), 0.02) 100%);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
+    border: 1px solid rgba(120, 120, 120, 0.2);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.25rem 0;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    box-shadow: 0 4px 20px rgba(var(--p-black-rgb), 0.12), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
 }
 
@@ -860,11 +886,11 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.6rem 0.9rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
+    background: rgba(120, 120, 120, 0.1);
+    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
     font-weight: 600;
     font-size: 0.9rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     letter-spacing: 0.02em;
 }
 
@@ -876,7 +902,7 @@ export default {
 
 .wire-config-header-left i {
     font-size: 0.95rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.35));
+    filter: drop-shadow(0 0 3px rgba(var(--p-black-rgb), 0.12));
 }
 
 .wire-config-header-right {
@@ -912,33 +938,33 @@ export default {
 
 .wire-config-header-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 /* Highlight the Advise / Advise all buttons in danger color while a wire is
    incomplete, so the user is reminded they can use it as a shortcut. */
 .wire-config-header-btn.wire-config-header-btn-needs-attention {
-    color: var(--bs-danger) !important;
-    border-color: rgb(var(--bs-danger-rgb) / 0.6) !important;
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+    color: var(--p-danger) !important;
+    border-color: rgb(var(--p-danger-rgb) / 0.6) !important;
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.35);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-danger-rgb) / 0.4),
-        0 2px 10px rgb(var(--bs-danger-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        0 0 0 1px rgb(var(--p-danger-rgb) / 0.4),
+        0 2px 10px rgb(var(--p-danger-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
     animation: wire-advise-pulse 1.8s ease-in-out infinite;
 }
 
 .wire-config-header-btn.wire-config-header-btn-needs-attention i {
-    color: var(--bs-danger);
+    color: var(--p-danger);
 }
 
 @keyframes wire-advise-pulse {
@@ -958,10 +984,15 @@ export default {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.15rem;
-    background: var(--bs-dark);
+    background: var(--p-dark);
     border-radius: 10px;
     padding: 0.35rem;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
 }
+
 
 @media (max-width: 576px) {
     .wire-config-grid {
@@ -971,7 +1002,10 @@ export default {
 
 .wire-config-cell {
     border-radius: 10px;
-    padding: 0.1rem 0.35rem 0.1rem 0.35rem;
+    padding: 0.1rem 0.35rem;
+    box-sizing: border-box;
+    min-width: 0;
+    overflow: hidden;
 }
 
 .wire-config-cell-wide {
@@ -985,5 +1019,46 @@ export default {
 .wire-config-cell :deep(.form-label),
 .wire-config-cell :deep(label) {
     padding-left: 0.35rem !important;
+    text-align: start !important;
+}
+
+/* Match input value/unit font size to the Wire Info card values below. */
+.wire-config-cell :deep(.p-select-label),
+.wire-config-cell :deep(.p-select .p-select-label),
+.wire-config-cell :deep(.p-inputnumber-input),
+.wire-config-cell :deep(.p-inputnumber input),
+.wire-config-cell :deep(input.p-inputtext),
+.wire-config-cell :deep(.dwt-unit-addon),
+.wire-config-cell :deep(.dim-unit),
+.wire-config-cell :deep(.dim-input),
+.wire-config-cell :deep(.dim-input input) {
+    font-size: var(--wire-config-value-font-size, 1.15rem) !important;
+}
+
+/* One fixed label-column width for every wire field so the input boxes share a
+ * single left edge regardless of label text / row gutters (matches the core
+ * panel). Labels longer than this clip instead of shoving the inputs. */
+.wire-config-panel :deep(.efl-label),
+.wire-config-panel :deep(.dim-label) {
+    flex: 0 0 9rem !important;
+    width: 9rem !important;
+    max-width: 9rem !important;
+    box-sizing: border-box;
+}
+
+/* Constant vertical rhythm between wire fields (No. Turns / No. Parallels were
+ * tighter than the rest). Drop the grid row-gap + per-cell/col vertical padding
+ * and give every field one uniform bottom margin — same approach as the core
+ * panel. */
+.wire-config-grid { row-gap: 0 !important; }
+.wire-config-cell { padding-top: 0 !important; padding-bottom: 0 !important; }
+.wire-config-cell :deep([class*="col-"]) {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
+.wire-config-cell :deep(.efl-container),
+.wire-config-cell :deep(.dim-container) {
+    margin-top: 0 !important;
+    margin-bottom: 0.4rem !important;
 }
 </style>

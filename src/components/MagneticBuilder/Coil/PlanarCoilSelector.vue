@@ -1,8 +1,8 @@
 <script setup>
+import { CoilAlignment } from '../../../assets/ts/MAS.ts'
 import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.vue'
 import ListOfCharacters from '/WebSharedComponents/DataInput/ListOfCharacters.vue'
-import BasicCoilSubmenu from './BasicCoilSubmenu.vue'
 import CoilInfo from './CoilInfo.vue'
 import BasicCoilFillingFactors from './BasicCoilFillingFactors.vue'
 import PlanarInsulationSelector from './PlanarInsulationSelector.vue'
@@ -44,6 +44,10 @@ export default {
             type: Boolean,
             default: false,
         },
+        showInterleavingOrder: {
+            type: Boolean,
+            default: true,
+        },
         operatingPointIndex: {
             type: Number,
             default: 0,
@@ -59,6 +63,10 @@ export default {
         forceUpdateVisualizer: {
             type: Number,
             default: 0,
+        },
+        enableTemperaturePlot: {
+            type: Boolean,
+            default: true,
         },
     },
     data() {
@@ -79,7 +87,7 @@ export default {
             clearancePerWinding: {},
             coreToLayerDistance: 0.0001,
             borderToWireDistance: 0.0001,
-            sectionsAlignment: "centered"
+            sectionsAlignment: CoilAlignment.Centered
         }
         const coilAlignments = {};
 
@@ -140,7 +148,7 @@ export default {
                     this.localData.clearancePerWinding = {};
                     this.localData.coreToLayerDistance = 0.0001;
                     this.localData.borderToWireDistance = 0.0001;
-                    this.localData.sectionsAlignment = "centered";
+                    this.localData.sectionsAlignment = CoilAlignment.Centered;
                 }
             });
         }))
@@ -465,8 +473,6 @@ export default {
                 this.showInsulationOptions = !this.showInsulationOptions;
             }
         },
-        customizeCoil() {
-        },
         showParasiticsView() {
             this.$stateStore.magneticBuilder.mode.coil = this.$stateStore.MagneticBuilderModes.Advanced;
         },
@@ -487,7 +493,7 @@ export default {
         <div class="coil-config-panel">
             <div class="coil-config-header">
                 <div class="coil-config-header-left">
-                    <i class="fa-solid fa-gears"></i>
+                    <i class="pi pi-cog-wide-connected"></i>
                     <span>Coil Configuration</span>
                 </div>
                 <div class="coil-config-header-right">
@@ -497,7 +503,7 @@ export default {
                         :data-cy="dataTestLabel + '-Coil-ShowInsulationOptions-button'"
                         @click="swapShowInsulationOptions(!showInsulationOptions)"
                     >
-                        <i class="fa-solid fa-shield-halved"></i>
+                        <i class="pi pi-shield"></i>
                         <span>Insulation</span>
                     </button>
                 </div>
@@ -518,9 +524,16 @@ export default {
                         :coilFits="true"
                         :plotModeInit="$stateStore.magnetic2DVisualizerState.plotMode"
                         :includeFringingInit="$stateStore.magnetic2DVisualizerState.includeFringing"
-                        :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || '#1a1a1a'"
-                        :textColor="$styleStore.magneticBuilder.inputTextColor?.color || 'var(--bs-white)'"
+                        :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || 'var(--p-dark)'"
+                        :textColor="$styleStore.magneticBuilder.inputTextColor?.color || 'var(--p-white)'"
                         :buttonStyle="$styleStore.magneticBuilder.coilVisualizerButton"
+                        :insulationColor="$styleStore.magneticBuilder.painterColorInsulation || '0xfff05b'"
+                        :marginColor="$styleStore.magneticBuilder.painterColorMargin || '0xfff05b'"
+                        :spacerColor="$styleStore.magneticBuilder.painterColorSpacer || '0x3b3b3b'"
+                        :ferriteColor="$styleStore.magneticBuilder.painterColorFerrite || '0x7b7c7d'"
+                        :copperColor="$styleStore.magneticBuilder.painterColorCopper || '0xb87333'"
+                        :drawSpacer="$styleStore.magneticBuilder.painterDrawSpacer !== undefined ? $styleStore.magneticBuilder.painterDrawSpacer : true"
+                        :enableTemperaturePlot="enableTemperaturePlot"
                         @plotModeChange="$emit('plotModeChange', $event)"
                         @swapIncludeFringing="$emit('swapIncludeFringing', $event)"
                         @errorInImage="$emit('errorInImage')"
@@ -536,26 +549,26 @@ export default {
                         class="builder-action-btn builder-action-btn-outline"
                         @click="showParasiticsView"
                     >
-                        <i class="fa-solid fa-wave-square me-2"></i>Advanced Parasitics
+                        <i class="pi pi-volume-up mr-2"></i>Advanced Parasitics
                     </button>
 
                     <button
-                        v-if="enableSimulation"
+                        v-if="enableSimulation && enableTemperaturePlot"
                         :disabled="masStore.mas.magnetic == null || masStore.mas.magnetic.core == null || masStore.mas.magnetic.core.functionalDescription.shape == ''"
                         :data-cy="dataTestLabel + '-Coil-ToggleTemperaturePlot-button'"
                         :class="['builder-action-btn', $stateStore.magnetic2DVisualizerState.plotMode === 'temperature_field' ? 'builder-action-btn-primary' : 'builder-action-btn-ghost']"
                         @click="toggleTemperaturePlot"
                     >
-                        <i class="fa-solid fa-temperature-half me-2 temp-icon"></i>{{ $stateStore.magnetic2DVisualizerState.plotMode === 'temperature_field' ? 'Hide Temperature' : 'Show Temperature' }}
+                        <i class="pi pi-sun mr-2 temp-icon"></i>{{ $stateStore.magnetic2DVisualizerState.plotMode === 'temperature_field' ? 'Hide Temperature' : 'Show Temperature' }}
                     </button>
                 </div>
 
                 <div class="coil-config-grid">
-                    <div v-if="!loading && masStore.mas.magnetic.coil.functionalDescription.length > 0" class="coil-config-cell coil-config-cell-wide">
+                    <div v-if="showInterleavingOrder && !loading && masStore.mas.magnetic.coil.functionalDescription.length > 0" class="coil-config-cell coil-config-cell-wide">
                         <ListOfCharacters
                             v-tooltip="tooltipsMagneticBuilder.sectionsInterleaving"
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :dataTestLabel="dataTestLabel + '-SectionsInterleaving'"
                             :modelValue="localData.stackUp"
                             @updateModelValue="localData.stackUp = $event"
@@ -575,7 +588,7 @@ export default {
                         <ElementFromList
                             v-tooltip="tooltipsMagneticBuilder.sectionsAlignment"
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :dataTestLabel="dataTestLabel + '-SectionsAlignment'"
                             :name="'sectionsAlignment'"
                             :replaceTitle="'PCB Alignment'"
@@ -624,12 +637,12 @@ export default {
 
 <style scoped>
 .coil-config-panel {
-    background: linear-gradient(145deg, rgba(var(--bs-primary-rgb), 0.06) 0%, rgba(var(--bs-primary-rgb), 0.02) 100%);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
+    border: 1px solid rgba(120, 120, 120, 0.2);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.25rem 0;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    box-shadow: 0 4px 20px rgba(var(--p-black-rgb), 0.12), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
 }
 
@@ -638,11 +651,11 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.6rem 0.9rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
+    background: rgba(120, 120, 120, 0.1);
+    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
     font-weight: 600;
     font-size: 0.9rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     letter-spacing: 0.02em;
 }
 
@@ -654,7 +667,7 @@ export default {
 
 .coil-config-header-left i {
     font-size: 0.95rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.35));
+    filter: drop-shadow(0 0 3px rgba(var(--p-black-rgb), 0.12));
 }
 
 .coil-config-header-right {
@@ -685,29 +698,29 @@ export default {
 
 .coil-config-header-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .coil-config-header-btn-outline {
-    background: rgb(var(--bs-primary-rgb) / 0.2);
-    border: 1px solid rgb(var(--bs-primary-rgb) / 0.55);
-    color: var(--bs-primary);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    background: rgb(var(--p-primary-rgb) / 0.2);
+    border: 1px solid rgb(var(--p-primary-rgb) / 0.55);
+    color: var(--p-primary);
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.2);
 }
 
 .coil-config-header-btn-outline:hover {
-    background: rgb(var(--bs-primary-rgb) / 0.3);
-    border-color: rgb(var(--bs-primary-rgb) / 0.75);
-    box-shadow: 0 2px 6px rgb(var(--bs-primary-rgb) / 0.25);
+    background: rgb(var(--p-primary-rgb) / 0.3);
+    border-color: rgb(var(--p-primary-rgb) / 0.75);
+    box-shadow: 0 2px 6px rgb(var(--p-primary-rgb) / 0.25);
 }
 
 .coil-config-body {
@@ -718,7 +731,7 @@ export default {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.15rem;
-    background: var(--bs-dark);
+    background: var(--p-dark);
     border-radius: 10px;
     padding: 0.35rem;
 }
@@ -780,33 +793,33 @@ export default {
 
 .builder-action-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-success) 115%, transparent 0%) 0%,
-        var(--bs-success) 55%,
-        rgb(var(--bs-success-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 2px solid color-mix(in srgb, var(--bs-success) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-success) 115%, transparent 0%) 0%,
+        var(--p-success) 55%,
+        rgb(var(--p-success-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 2px solid color-mix(in srgb, var(--p-success) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 2px rgb(var(--bs-success-rgb) / 0.35),
-        0 4px 14px rgb(var(--bs-success-rgb) / 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        0 0 0 2px rgb(var(--p-success-rgb) / 0.35),
+        0 4px 14px rgb(var(--p-success-rgb) / 0.5),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 2px rgba(var(--p-black-rgb), 0.25);
 }
 
 .builder-action-btn-outline {
-    background: rgb(var(--bs-primary-rgb) / 0.2);
-    border: 1px solid rgb(var(--bs-primary-rgb) / 0.55);
-    color: var(--bs-primary);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    background: rgb(var(--p-primary-rgb) / 0.2);
+    border: 1px solid rgb(var(--p-primary-rgb) / 0.55);
+    color: var(--p-primary);
+    box-shadow: 0 2px 6px rgba(var(--p-black-rgb), 0.2);
 }
 
 .builder-action-btn-ghost {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    color: rgba(255, 255, 255, 0.9);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    background: rgba(var(--p-white-rgb), 0.08);
+    border: 1px solid rgba(var(--p-white-rgb), 0.28);
+    color: rgba(var(--p-white-rgb), 0.9);
+    box-shadow: 0 2px 6px rgba(var(--p-black-rgb), 0.2);
 }
 
 .temp-icon {
-    color: var(--bs-danger);
+    color: var(--p-danger);
 }
 </style>

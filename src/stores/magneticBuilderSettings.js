@@ -6,6 +6,7 @@ export const useMagneticBuilderSettingsStore = defineStore("magneticBuilderSetti
     const enableSimulation = ref(true);
     const enableAutoSimulation = ref(true);
     const enableSubmenu = ref(true);
+    const enableCustomize = ref(true);
     const enableGraphs = ref(false);
     const enableContextMenu = ref(false);
     
@@ -19,6 +20,7 @@ export const useMagneticBuilderSettingsStore = defineStore("magneticBuilderSetti
         this.enableSimulation = true;
         this.enableAutoSimulation = true;
         this.enableSubmenu = true;
+        this.enableCustomize = true;
         this.enableGraphs = true;
         this.enableContextMenu = false;
         this.coilDataOutdated = false;
@@ -31,6 +33,7 @@ export const useMagneticBuilderSettingsStore = defineStore("magneticBuilderSetti
         enableSimulation,
         enableAutoSimulation,
         enableSubmenu,
+        enableCustomize,
         enableGraphs,
         enableContextMenu,
         coilDataOutdated,
