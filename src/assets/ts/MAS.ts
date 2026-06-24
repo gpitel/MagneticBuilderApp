@@ -2698,6 +2698,7 @@ export enum SubApplication {
  * PCB mounting style. Uses the same connectionType enum as designRequirements.terminalType.
  */
 export enum ConnectionType {
+    Blind = "blind",
     FlyingLead = "flyingLead",
     PCBPad = "pcbPad",
     Pin = "pin",
