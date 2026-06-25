@@ -31,13 +31,22 @@ export default {
     },
     data() {
         return {
-            // 'Blind' is our local winding-to-winding marker; it is not (yet) in
-            // the generated MAS.ts ConnectionType enum, and round-trips to MAS as
-            // the verbatim string. Two windings sharing a blind pinName are joined.
-            blindType: 'Blind',
-            // ConnectionType is a string enum ("Pin", "Screw", "SMT", "Flying Lead");
-            // store the value verbatim so it round-trips to MAS unchanged.
-            connectionTypeOptions: [...Object.values(ConnectionType), 'Blind'],
+            // 'blind' is the winding-to-winding marker — now a first-class
+            // ConnectionType enum value, so it must NOT be appended separately
+            // (appending it once the enum gained "blind" produced a duplicate
+            // dropdown option). Two windings sharing a blind pinName are joined.
+            // Detection is case-insensitive (see isBlind) so legacy designs that
+            // stored the capitalised "Blind" still round-trip correctly.
+            blindType: ConnectionType.Blind,
+            // Display labels for the raw enum values, mirroring DesignRequirements.vue,
+            // so the dropdown reads "Pin"/"Blind" rather than "pin"/"blind". The value
+            // stored on the connection stays verbatim (the lowercase enum value) so it
+            // round-trips to MAS unchanged.
+            connectionTypeLabels: {
+                blind: 'Blind', flyingLead: 'Flying Lead', pcbPad: 'PCB Pad',
+                pin: 'Pin', smt: 'SMT', screw: 'Screw', tht: 'THT',
+            },
+            connectionTypeOptions: Object.values(ConnectionType),
         }
     },
     computed: {
@@ -98,7 +107,7 @@ export default {
             const ids = new Set();
             windings.forEach((w) => {
                 (w.connections || []).forEach((c) => {
-                    if (c && c.type === this.blindType
+                    if (c && this.isBlind(c.type)
                         && c.pinName != null && String(c.pinName).trim() !== '') {
                         ids.add(String(c.pinName));
                     }
@@ -239,6 +248,12 @@ export default {
                 });
             }
         },
+        // Blind detection is case-insensitive so both the canonical lowercase
+        // "blind" and any legacy capitalised "Blind" count as winding-to-winding
+        // joints (the value is otherwise stored verbatim).
+        isBlind(type) {
+            return typeof type === 'string' && type.toLowerCase() === this.blindType;
+        },
         updateConnection(index, key, value) {
             if (this.readOnly) {
                 return;
@@ -254,7 +269,7 @@ export default {
             winding.connections[index][key] = value;
             // A blind (internal) joint has no lead-to-terminal length; drop any
             // stale value so the editor and the MAS export agree.
-            if (key === 'type' && value === this.blindType) {
+            if (key === 'type' && this.isBlind(value)) {
                 delete winding.connections[index].length;
             }
             // connection.type is source of truth; sync the per-winding terminalType projection.
@@ -272,7 +287,7 @@ export default {
             const connections = (winding != null && Array.isArray(winding.connections)) ? winding.connections : [];
             const types = connections
                 .map((connection) => (connection != null ? connection.type : null))
-                .filter((type) => type != null && type !== '' && type !== this.blindType);
+                .filter((type) => type != null && type !== '' && !this.isBlind(type));
             if (types.length === 0) {
                 return;
             }
@@ -409,7 +424,7 @@ export default {
                     :data-cy="dataTestLabel + '-Connection-' + index"
                 >
                     <input
-                        v-if="connection.type === blindType"
+                        v-if="isBlind(connection.type)"
                         type="text"
                         class="labelpin-field"
                         :style="fieldStyle"
@@ -456,7 +471,7 @@ export default {
                         v-tooltip="lockTerminalType ? 'Terminal type is set for all windings in Design Requirements (Simple mode). Switch it to Advanced there to edit per lead.' : 'Terminal type'"
                         @change="updateConnection(index, 'type', $event.target.value)"
                     >
-                        <option v-for="opt in connectionTypeOptions" :key="opt" :value="opt">{{ opt }}</option>
+                        <option v-for="opt in connectionTypeOptions" :key="opt" :value="opt">{{ connectionTypeLabels[opt] || opt }}</option>
                     </select>
                     <input
                         type="number"
@@ -465,10 +480,10 @@ export default {
                         class="labelpin-field"
                         :style="fieldStyle"
                         :class="fieldClass"
-                        :disabled="readOnly || connection.type === blindType"
-                        :value="connection.type === blindType ? '' : leadLengthMm(connection)"
+                        :disabled="readOnly || isBlind(connection.type)"
+                        :value="isBlind(connection.type) ? '' : leadLengthMm(connection)"
                         :data-cy="dataTestLabel + '-Connection-' + index + '-Length'"
-                        v-tooltip="connection.type === blindType ? 'A blind winding-to-winding joint has no lead-to-terminal length' : 'Lead length from the last turn to the terminal, in mm (stored in metres on connection.length). Leave blank to omit.'"
+                        v-tooltip="isBlind(connection.type) ? 'A blind winding-to-winding joint has no lead-to-terminal length' : 'Lead length from the last turn to the terminal, in mm (stored in metres on connection.length). Leave blank to omit.'"
                         @change="updateLength(index, $event.target.value)"
                     >
                     <button
