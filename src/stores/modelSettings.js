@@ -341,6 +341,22 @@ export const useModelSettingsStore = defineStore("modelSettings", () => {
         }
     }, { deep: true })
 
+    // Initialise from the WASM defaults as soon as the store is created.
+    // The H-field / fringing / winding-loss / stray-capacitance model NAMES have
+    // no static default (unlike IGSE / Maniktala / Zhang) — they are only known
+    // after querying the WASM, so until loadFromWASM() runs these refs are null.
+    // Passing a null model name to MKF throws
+    // "[json.exception.type_error.302] type must be string, but is null", which
+    // aborts every core-loss / inductance simulation (Core Info shows OUTDATED
+    // zeros, Graphs stay empty). Previously loadFromWASM() was triggered only by
+    // opening the Settings panel, so any builder opened without visiting Settings
+    // — e.g. the El Choker and La Ferrita advanced-detail embeds — simulated with
+    // null models. Kick it off on creation (consumers already gate on
+    // `isInitialized`); guarded so a later Settings open / reset still re-syncs.
+    if (!isInitialized.value && !isLoading.value) {
+        loadFromWASM()
+    }
+
     return {
         // State
         magneticFieldStrengthModel,

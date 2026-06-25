@@ -1,13 +1,12 @@
 import { createApp } from 'vue'
 import App from './App.vue'
 import './assets/css/custom.css'
-import { Tooltip } from 'bootstrap';
-import 'bootstrap';
+import 'primeflex/primeflex.css'
 import router from "./router";
 import { createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import VueCookies from 'vue3-cookies'
-import tooltip from "/WebSharedComponents/Common/TooltipDirective.vue";
+import PrimeVueTooltip from 'primevue/tooltip'
 import axios from "axios";
 import { useUserStore } from '/src/stores/user'
 import { useSettingsStore } from '/src/stores/settings'
@@ -17,15 +16,6 @@ import { useStyleStore } from '/src/stores/style'
 import { initWorker } from '/WebSharedComponents/assets/js/mkfRuntime'
 import VueLatex from 'vatex'
 import { checkAndClearOutdatedStores, getVersionedWasmUrl } from '/src/stores/storeVersioning'
-
-// Monkey-patch Bootstrap Tooltip to fix _activeTrigger null errors
-const originalIsWithActiveTrigger = Tooltip.prototype._isWithActiveTrigger;
-Tooltip.prototype._isWithActiveTrigger = function() {
-    if (!this._activeTrigger || typeof this._activeTrigger !== 'object') {
-        this._activeTrigger = {};
-    }
-    return originalIsWithActiveTrigger.call(this);
-};
 
 // Check and clear outdated stores BEFORE Pinia is initialized
 // This ensures old store data with incompatible field names is cleared
@@ -41,7 +31,7 @@ app.use(pinia)
 app.use(VueCookies, { expires: '7d'})
 app.use(VueWindowSizePlugin);
 app.use(VueLatex);
-app.directive("tooltip", tooltip);
+app.directive('tooltip', PrimeVueTooltip);
 app.config.globalProperties.$axios = axiosInstance
 app.config.globalProperties.$userStore = useUserStore()
 app.config.globalProperties.$settingsStore = useSettingsStore()

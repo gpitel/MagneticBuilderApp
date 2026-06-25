@@ -8,6 +8,7 @@ import AdvancedCoreSelector from './MagneticBuilder/Core/AdvancedCoreSelector.vu
 import AdvancedCoilInfo from './MagneticBuilder/Coil/AdvancedCoilInfo.vue'
 import GraphInfo from './MagneticBuilder/GraphInfo.vue'
 import { isMobile } from '/WebSharedComponents/assets/js/utils.js'
+import { recordDesign } from '/WebSharedComponents/assets/js/telemetry.js'
 import { useMagneticBuilderSettingsStore } from '../stores/magneticBuilderSettings'
 
 </script>
@@ -59,9 +60,17 @@ export default {
             type: Boolean,
             default: false,
         },
+        showInterleavingOrder: {
+            type: Boolean,
+            default: true,
+        },
         operatingPointIndex: {
             type: Number,
             default: 0,
+        },
+        enableTemperaturePlot: {
+            type: Boolean,
+            default: true,
         },
     },
     data() {
@@ -78,7 +87,6 @@ export default {
             magneticBuilt,
             historyStore,
             subscriptions,
-            _insertMasTimer: null,
         }
     },
     computed: {
@@ -135,15 +143,6 @@ export default {
             if (action.name == "addToHistory") {
                 this.magneticBuilt = this.isMagneticBuilt();
                 this.$emit("canContinue", this.magneticBuilt);
-                if (this.magneticBuilt && !this.isIsolatedApp && this.enableInsertIntermediateMas) {
-                    // Debounce to avoid firing multiple backend calls when
-                    // several addToHistory events arrive in quick succession.
-                    if (this._insertMasTimer) clearTimeout(this._insertMasTimer);
-                    this._insertMasTimer = setTimeout(() => {
-                        this._insertMasTimer = null;
-                        this.insertIntermediateMas();
-                    }, 500);
-                }
             }
         }));
 
@@ -157,20 +156,18 @@ export default {
 
     },
     beforeUnmount() {
-        if (this._insertMasTimer) clearTimeout(this._insertMasTimer);
+        // Capture the builder state once, as the user leaves the builder, rather
+        // than on every edit. Tied to the session_id, this gives one clean
+        // "final builder state" row that pairs with the later design_report.
+        if (this.magneticBuilt && !this.isIsolatedApp && this.enableInsertIntermediateMas) {
+            this.insertIntermediateMas();
+        }
         this.subscriptions.forEach((unsubscribe) => unsubscribe());
     },
     methods: {
         insertIntermediateMas() {
-            const url = import.meta.env.VITE_API_ENDPOINT + '/insert_intermediate_mas'
-
-            this.$axios.post(url, this.masStore.mas)
-            .then(response => {
-            })
-            .catch(error => {
-                console.error("Error inserting")
-                console.error(error)
-            });
+            // Intermediate working state — the builder design as the user leaves it.
+            recordDesign({ event_type: 'builder_snapshot', source: 'builder', mas: this.masStore.mas });
         },
         isMagneticBuilt() {
             if (this.masStore.mas.magnetic.core.functionalDescription.material == null) {
@@ -243,7 +240,7 @@ export default {
             v-else
             class="row gx-0"
         >
-            <div :class="isMobile($windowWidth)? 'col-12' : enableCoil? 'col-4' : 'offset-1 col-4'">
+            <div :class="isMobile($windowWidth)? 'col-12' : enableCoil? 'col-4' : 'col-offset-1 col-4'">
                 <CoreBuilder 
                     :masStore="masStore"
                     :readOnly="readOnly"
@@ -251,13 +248,13 @@ export default {
                     :enableSimulation="enableSimulationComputed"
                     :enableAutoSimulation="enableAutoSimulationComputed"
                     :enableSubmenu="enableSubmenu"
-                    :enableCustomize="enableSubmenu"
+                    :enableCustomize="magneticBuilderSettingsStore.enableCustomize"
                     :enableAdvise="enableAdvisers && !isIsolatedApp"
                     :operatingPointIndex="operatingPointIndex"
                     @customizeCore="customizeCore"
                 />
             </div>
-            <div :class="isMobile($windowWidth)? 'col-12' : enableCoil? 'col-4' : 'offset-1 col-4'">
+            <div :class="isMobile($windowWidth)? 'col-12' : enableCoil? 'col-4' : 'col-offset-1 col-4'">
                 <BasicWireBuilder 
                     :masStore="masStore"
                     :readOnly="readOnly"
@@ -281,6 +278,8 @@ export default {
                     :enableSubmenu="enableSubmenu"
                     :enableAdvise="enableAdvisers && !isIsolatedApp"
                     :operatingPointIndex="operatingPointIndex"
+                    :showInterleavingOrder="showInterleavingOrder"
+                    :enableTemperaturePlot="enableTemperaturePlot"
                 />
             </div> 
             <div v-else class="col-2"/>

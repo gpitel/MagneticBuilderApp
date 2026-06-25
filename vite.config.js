@@ -1,6 +1,7 @@
 import { fileURLToPath, URL } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { defineConfig } from 'vite'
 import vue from "@vitejs/plugin-vue";
@@ -25,6 +26,12 @@ function getWebSharedComponentsPath() {
     }
     return localPath;
 }
+
+// Resolved at config-load time (top-level await is fine for Vite ESM config).
+const masRegen = (await import(
+    pathToFileURL(path.join(getWebSharedComponentsPath(), 'build-tools', 'vite-plugin-mas-regen.js')).href
+)).default;
+
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -65,6 +72,13 @@ export default defineConfig({
     },
     publicDir: 'src/public',
     plugins: [
+        // Auto-regen MAS.ts when MAS schemas change. See WebSharedComponents/build-tools.
+        masRegen({
+            targets: [
+                fileURLToPath(new URL('./src/assets/ts/MAS.ts', import.meta.url)),
+                path.join(getWebSharedComponentsPath(), 'assets', 'ts', 'MAS.ts'),
+            ],
+        }),
         vue({
           template: {
             compilerOptions: {
@@ -84,6 +98,14 @@ export default defineConfig({
                 },
                 {
                     src: 'src/assets/js/libMKF.wasm.wasm',
+                    dest: 'wasm'
+                },
+                {
+                    src: 'src/assets/js/mvbpp.js',
+                    dest: 'wasm'
+                },
+                {
+                    src: 'src/assets/js/mvbpp.wasm',
                     dest: 'wasm'
                 }
             ]

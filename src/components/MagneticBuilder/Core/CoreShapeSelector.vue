@@ -41,6 +41,7 @@ export default {
             taskQueueStore,
             historyStore,
             localData,
+            coreShapeTableVisible: false,
             coreShapeNames,
             coreShapeFamilies,
             loading,
@@ -61,7 +62,7 @@ export default {
             // (e.g., exclude toroidal cores when in Planar mode)
             if (newVal !== oldVal) {
                 // If switching to Printed/Planar and currently a toroidal core is selected, clear it
-                if (newVal === 'Printed' && this.localData.shapeFamily?.toLowerCase() === 't') {
+                if (newVal?.toLowerCase() === 'printed' && this.localData.shapeFamily?.toLowerCase() === 't') {
                     this.localData.shapeFamily = null;
                     this.localData.shape = null;
                     // Also clear from the mas store
@@ -117,7 +118,12 @@ export default {
                     if (args[0]) {
                         this.coreShapeNames = args[1];
                         for (const [shapeFamily, group] of Object.entries(this.coreShapeNames)) {
-                            this.coreShapeFamilies[shapeFamily] = shapeFamily.toUpperCase();
+                            // Planar families are camelCase ("planarE", "planarEl",
+                            // "planarEr"); plain toUpperCase() makes them an
+                            // unreadable "PLANARE". Render them as "Planar E" etc.
+                            this.coreShapeFamilies[shapeFamily] = /^planar/i.test(shapeFamily)
+                                ? 'Planar ' + shapeFamily.slice(6).toUpperCase()
+                                : shapeFamily.toUpperCase();
                         }
                         // Use bulk function to get all core data at once
                         this.taskQueueStore.processAllCoresFromShapes();
@@ -252,7 +258,8 @@ export default {
 }
 </script>
 <template>
-    <CoreShapeTableModal 
+    <CoreShapeTableModal
+        v-model:visible="coreShapeTableVisible"
         :dataTestLabel="dataTestLabel"
         :coreShapeData="coreShapeData"
         :shapeFamily="localData.shapeFamily"
@@ -265,77 +272,121 @@ export default {
                 v-tooltip="tooltipsMagneticBuilder.coreShapeFamily"
                 v-if="!loading"
                 :disabled="readOnly"
-                class="col-12 mb-1 text-start"
+                class="col-12 mb-1 text-left"
                 :dataTestLabel="dataTestLabel + '-ShapeFamilies'"
                 :name="'shapeFamily'"
                 :titleSameRow="true"
                 :justifyContent="true"
                 v-model="localData"
                 :options="coreShapeFamilies"
-                :labelWidthProportionClass="'col-sm-12 col-md-5'"
-                :valueWidthProportionClass="'col-sm-12 col-md-7'"
+                :labelWidthProportionClass="'col-12 md:col-5'"
+                :valueWidthProportionClass="'col-12 md:col-7'"
                 :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                 :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                 :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
                 :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                 :textColor="$styleStore.magneticBuilder.inputTextColor"
             />
-            <ElementFromList
-                v-tooltip="tooltipsMagneticBuilder.coreShape"
-                v-if="!loading && localData.shapeFamily != null && coreShapeNames[localData.shapeFamily] != null && coreShapeNames[localData.shapeFamily].length > 0"
-                :disabled="readOnly"
-                class="col-10 mb-1 text-start"
-                :dataTestLabel="dataTestLabel + '-ShapeNames'"
-                :name="'shape'"
-                :titleSameRow="true"
-                :justifyContent="true"
-                v-model="localData"
-                :optionsToDisable="Object.keys(coreShapeFamilies)"
-                :options="coreShapeNames[localData.shapeFamily]"
-                @update="$emit('update', localData.shape, localData.shapeFamily)"
-                :labelWidthProportionClass="'col-sm-12 col-md-5'"
-                :valueWidthProportionClass="'col-sm-12 col-md-7'"
-                :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
-                :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
-                :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
-                :textColor="$styleStore.magneticBuilder.inputTextColor"
-            />
-
             <div
                 v-if="!loading && localData.shapeFamily != null && coreShapeNames[localData.shapeFamily] != null && coreShapeNames[localData.shapeFamily].length > 0"
-                class="ms-3 col-1 p-0 pt-1"
-                v-tooltip="'Open core shape table'"
+                class="core-shape-input-group col-12"
             >
-                <button
-                    :style="$styleStore.magneticBuilder.tableButton"
-                    class="shape-table-btn"
-                    data-bs-toggle="modal"
-                    data-bs-target="#coreShapeTableModal"
-                    >
-                    <i class="fa-solid fa-table-list"></i>
-                </button>
+                <ElementFromList
+                    v-tooltip="tooltipsMagneticBuilder.coreShape"
+                    :disabled="readOnly"
+                    class="col-12 text-left core-shape-row"
+                    :dataTestLabel="dataTestLabel + '-ShapeNames'"
+                    :name="'shape'"
+                    :titleSameRow="true"
+                    :justifyContent="true"
+                    v-model="localData"
+                    :optionsToDisable="Object.keys(coreShapeFamilies)"
+                    :options="coreShapeNames[localData.shapeFamily]"
+                    @update="$emit('update', localData.shape, localData.shapeFamily)"
+                    :labelWidthProportionClass="'col-12 md:col-5'"
+                    :valueWidthProportionClass="'col-12 md:col-7'"
+                    :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
+                    :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                    :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
+                    :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                    :textColor="$styleStore.magneticBuilder.inputTextColor"
+                />
+
+                <div
+                    v-if="!readOnly"
+                    class="core-shape-table-btn-wrapper"
+                    v-tooltip="'Open core shape table'"
+                >
+                    <button
+                        :style="$styleStore.magneticBuilder.tableButton"
+                        class="shape-table-btn"
+                        @click="coreShapeTableVisible = true"
+                        >
+                        <i class="pi pi-table"></i>
+                    </button>
+                </div>
             </div>
     </div>
 </template>
 
 <style scoped>
+/* Shape <select> + "open core-shape table" button on the SAME row,
+ * button flush against the select's right edge, not overlapping it. */
+.core-shape-input-group {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+}
+
+/* The ElementFromList wrapper takes the full row width. The button is
+ * absolute-positioned over the row's right edge: only the dropdown
+ * inside the value column needs to shrink by the button's width. */
+.core-shape-input-group :deep(.core-shape-row) {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+/* Shrink the dropdown (and only the dropdown) inside the value column so
+ * it doesn't slide under the absolute-positioned table button. */
+.core-shape-input-group :deep(.core-shape-row .p-select),
+.core-shape-input-group :deep(.core-shape-row select.efl-select) {
+    width: calc(100% - 2.25rem) !important;
+    max-width: calc(100% - 2.25rem) !important;
+    margin-right: 2.25rem !important;
+}
+
+/* The button is absolute-positioned against `.core-shape-input-group`
+ * (relative parent), pinned to the right edge and vertically centered
+ * over the select's row inside the ElementFromList. */
+.core-shape-table-btn-wrapper {
+    position: absolute;
+    right: 8px;             /* shim: align button right edge with the other
+                               dropdowns (Family / Mfg / Material), which end
+                               8px inside the value column's right border */
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    z-index: 2;
+    padding: 0;
+}
+
 .shape-table-btn {
     height: 1.75rem;
-    padding: 0 0.6rem;
-    background-color: var(--p-surface-600);
-    color: var(--p-surface-50);
-    border: 1px solid var(--p-surface-400);
+    width: 1.75rem;
+    padding: 0;
+    background-color: transparent;
+    color: var(--p-primary);
+    border: 0;
     border-radius: var(--p-border-radius);
     font-family: var(--p-font-family);
-    font-size: 0.8rem;
+    font-size: 1rem;
     cursor: pointer;
-    transition: background-color 0.2s, border-color 0.2s;
+    transition: background-color 0.15s, color 0.15s;
 }
 
 .shape-table-btn:hover {
-    background-color: var(--p-primary-color);
-    border-color: var(--p-primary-color);
-    color: var(--p-surface-800);
+    background-color: rgba(var(--p-primary-rgb), 0.15);
+    color: var(--p-white);
 }
 </style>

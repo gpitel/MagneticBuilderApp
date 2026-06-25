@@ -44,9 +44,17 @@ export default {
             type: Boolean,
             default: false,
         },
+        showInterleavingOrder: {
+            type: Boolean,
+            default: true,
+        },
         operatingPointIndex: {
             type: Number,
             default: 0,
+        },
+        enableTemperaturePlot: {
+            type: Boolean,
+            default: true,
         },
     },
     data() {
@@ -212,7 +220,7 @@ export default {
     <div v-if="!missingWires && masStore.mas.magnetic.core != null && masStore.mas.magnetic.core.functionalDescription.shape != ''" class="container">
         <div class="row">
             <BasicCoilSelector
-                v-if="(masStore.mas.inputs.designRequirements.wiringTechnology == null || masStore.mas.inputs.designRequirements.wiringTechnology == 'Wound')"
+                v-if="(masStore.mas.inputs.designRequirements.wiringTechnology == null || masStore.mas.inputs.designRequirements.wiringTechnology == 'wound')"
                 :masStore="masStore"
                 :readOnly="readOnly"
                 :operatingPointIndex="operatingPointIndex"
@@ -222,6 +230,8 @@ export default {
                 :useVisualizers="useVisualizers"
                 :imageUpToDate="imageUpToDate"
                 :forceUpdateVisualizer="forceUpdate"
+                :showInterleavingOrder="showInterleavingOrder"
+                :enableTemperaturePlot="enableTemperaturePlot"
                 @fits="fits"
                 @plotModeChange="plotModeChange"
                 @swapIncludeFringing="swapIncludeFringing"
@@ -238,6 +248,8 @@ export default {
                 :useVisualizers="useVisualizers"
                 :imageUpToDate="imageUpToDate"
                 :forceUpdateVisualizer="forceUpdate"
+                :showInterleavingOrder="showInterleavingOrder"
+                :enableTemperaturePlot="enableTemperaturePlot"
                 @fits="fits"
                 @plotModeChange="plotModeChange"
                 @swapIncludeFringing="swapIncludeFringing"

@@ -1,8 +1,8 @@
 <script setup>
+import { CoilAlignment, WindingOrientation } from '../../../assets/ts/MAS.ts'
 import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.vue'
 import ListOfCharacters from '/WebSharedComponents/DataInput/ListOfCharacters.vue'
-import BasicCoilSubmenu from './BasicCoilSubmenu.vue'
 import CoilInfo from './CoilInfo.vue'
 import BasicCoilFillingFactors from './BasicCoilFillingFactors.vue'
 import BasicCoilSectionInsulationSelector from './BasicCoilSectionInsulationSelector.vue'
@@ -44,6 +44,10 @@ export default {
             type: Boolean,
             default: false,
         },
+        showInterleavingOrder: {
+            type: Boolean,
+            default: true,
+        },
         operatingPointIndex: {
             type: Number,
             default: 0,
@@ -59,6 +63,10 @@ export default {
         forceUpdateVisualizer: {
             type: Number,
             default: 0,
+        },
+        enableTemperaturePlot: {
+            type: Boolean,
+            default: true,
         },
     },
     data() {
@@ -78,15 +86,15 @@ export default {
 
         let localData = {};
 
-        if (this.$stateStore.hasCurrentApplicationMirroredWindings()) {
+        if (this.masStore.hasMirroredWindings) {
             localData = {
-                sectionsOrientation: "contiguous",
-                sectionsAlignment: "spread",
+                sectionsOrientation: WindingOrientation.Contiguous,
+                sectionsAlignment: CoilAlignment.Spread,
                 interlayerThickness: 0,
                 intersectionThickness: 0,
                 dataPerSection: [{
-                    layersOrientation: "overlapping",
-                    turnsAlignment: "centered",
+                    layersOrientation: WindingOrientation.Overlapping,
+                    turnsAlignment: CoilAlignment.Centered,
                     topOrLeftMargin: 0,
                     bottomOrRightMargin: 0,
                 }],
@@ -104,13 +112,13 @@ export default {
         }
         else {
             localData = {
-                sectionsOrientation: "overlapping",
-                sectionsAlignment: "inner or top",
+                sectionsOrientation: WindingOrientation.Overlapping,
+                sectionsAlignment: CoilAlignment.InnerOrTop,
                 interlayerThickness: 0,
                 intersectionThickness: 0,
                 dataPerSection: [{
-                    layersOrientation: "overlapping",
-                    turnsAlignment: "spread",
+                    layersOrientation: WindingOrientation.Overlapping,
+                    turnsAlignment: CoilAlignment.Spread,
                     topOrLeftMargin: 0,
                     bottomOrRightMargin: 0,
                 }],
@@ -256,22 +264,22 @@ export default {
                 }
                 if (action.name == "resetMas") {
                     // Reset localData to defaults based on application type
-                    if (this.$stateStore.hasCurrentApplicationMirroredWindings()) {
-                        this.localData.sectionsOrientation = "contiguous";
-                        this.localData.sectionsAlignment = "spread";
+                    if (this.masStore.hasMirroredWindings) {
+                        this.localData.sectionsOrientation = WindingOrientation.Contiguous;
+                        this.localData.sectionsAlignment = CoilAlignment.Spread;
                         this.localData.dataPerSection = [{
-                            layersOrientation: "overlapping",
-                            turnsAlignment: "centered",
+                            layersOrientation: WindingOrientation.Overlapping,
+                            turnsAlignment: CoilAlignment.Centered,
                             topOrLeftMargin: 0,
                             bottomOrRightMargin: 0,
                         }];
                     }
                     else {
-                        this.localData.sectionsOrientation = "overlapping";
-                        this.localData.sectionsAlignment = "inner or top";
+                        this.localData.sectionsOrientation = WindingOrientation.Overlapping;
+                        this.localData.sectionsAlignment = CoilAlignment.InnerOrTop;
                         this.localData.dataPerSection = [{
-                            layersOrientation: "overlapping",
-                            turnsAlignment: "spread",
+                            layersOrientation: WindingOrientation.Overlapping,
+                            turnsAlignment: CoilAlignment.Spread,
                             topOrLeftMargin: 0,
                             bottomOrRightMargin: 0,
                         }];
@@ -386,26 +394,43 @@ export default {
                     if (section.type == "conduction") {
                         const windingIndex = this.getWindingIndex(coil, section.partialWindings[0].winding);
                         this.localData.pattern += String(windingIndex + 1)
+                        // Append wound_with partner indices so the backend wind() sees
+                        // ALL real windings, not just the "main" winding of each shared
+                        // section. Otherwise center-tap secondaries (e.g. AHB Sb, Push-Pull
+                        // Pb/Sb) end up with zero sections and throw "Number of slots
+                        // cannot be less than 1".
+                        const partners = coil.functionalDescription[windingIndex]?.woundWith ?? [];
+                        partners.forEach((partnerName) => {
+                            const partnerIndex = this.getWindingIndex(coil, partnerName);
+                            if (partnerIndex != null && partnerIndex !== windingIndex) {
+                                this.localData.pattern += String(partnerIndex + 1);
+                            }
+                        });
+                        // Distribute this section's dimension across ALL partial windings
+                        // sharing it, so center-tap pairs (PH1+PH2, SH1+SH2) end up with
+                        // equal proportions. Otherwise only partialWindings[0] gets the
+                        // full width, leaving the other halves at ~0 → backend computes
+                        // negative section widths ("section dimensions wrong").
+                        const sectionPartialWindings = section.partialWindings ?? [];
+                        const partialCount = sectionPartialWindings.length || 1;
+                        let sectionDim = 0;
                         if (bobbinShape == "round") {
-                            if (sectionsOrientation == "contiguous") {
-                                windingDimensions[windingIndex] += section.dimensions[1];
-                                windingDimensionsTotal += section.dimensions[1];
-                            }
-                            else {
-                                windingDimensions[windingIndex] += section.dimensions[0];
-                                windingDimensionsTotal += section.dimensions[0];
-                            }
+                            sectionDim = (sectionsOrientation == "contiguous")
+                                ? section.dimensions[1]
+                                : section.dimensions[0];
+                        } else {
+                            sectionDim = (sectionsOrientation == "contiguous")
+                                ? section.dimensions[1]
+                                : section.dimensions[0];
                         }
-                        else {
-                            if (sectionsOrientation == "contiguous") {
-                                windingDimensions[windingIndex] += section.dimensions[1];
-                                windingDimensionsTotal += section.dimensions[1];
+                        const perPartialDim = sectionDim / partialCount;
+                        sectionPartialWindings.forEach((pw) => {
+                            const pwIdx = this.getWindingIndex(coil, pw.winding);
+                            if (pwIdx != null) {
+                                windingDimensions[pwIdx] += perPartialDim;
+                                windingDimensionsTotal += perPartialDim;
                             }
-                            else {
-                                windingDimensions[windingIndex] += section.dimensions[0];
-                                windingDimensionsTotal += section.dimensions[0];
-                            }
-                        }
+                        });
                     }
                 })
                 this.localData.proportionPerWinding = []
@@ -423,6 +448,13 @@ export default {
             }
 
             const inputCoil = deepCopy(this.masStore.mas.magnetic.coil);
+
+            // Normalize wire: "" to "Dummy" — empty string is not a valid wire name
+            // and will cause a WASM schema error in find_wire_by_name("").
+            // This can occur for extra windings that have not yet been assigned by the adviser.
+            inputCoil.functionalDescription?.forEach(w => {
+                if (w.wire == null || w.wire === "") w.wire = "Dummy";
+            });
 
             const margins = [];
             // Use object format only when there are existing sections AND no new sections were added.
@@ -579,8 +611,8 @@ export default {
                                     }
                                     const template = sameWindingSection || previousSection;
                                     this.localData.dataPerSection.push({
-                                        layersOrientation: template ? template.layersOrientation : "overlapping",
-                                        turnsAlignment: template ? template.turnsAlignment : "spread",
+                                        layersOrientation: template ? template.layersOrientation : WindingOrientation.Overlapping,
+                                        turnsAlignment: template ? template.turnsAlignment : CoilAlignment.Spread,
                                         topOrLeftMargin: template ? template.topOrLeftMargin : 0,
                                         bottomOrRightMargin: template ? template.bottomOrRightMargin : 0,
                                     });
@@ -709,8 +741,8 @@ export default {
                     // Final fallback to defaults
                     if (!newSection) {
                         newSection = {
-                            layersOrientation: "overlapping",
-                            turnsAlignment: "spread",
+                            layersOrientation: WindingOrientation.Overlapping,
+                            turnsAlignment: CoilAlignment.Spread,
                             topOrLeftMargin: 0,
                             bottomOrRightMargin: 0,
                         };
@@ -728,8 +760,6 @@ export default {
         },
         swapShowInsulationOptions(showInsulationOptions) {
             this.showInsulationOptions = showInsulationOptions;
-        },
-        customizeCoil() {
         },
         bobbinUpdated(thickness) {
             // Prevent regenerating bobbin with zero thickness values
@@ -780,21 +810,24 @@ export default {
 
 <template>
     <div class="container">
-        <div class="coil-config-panel">
+        <div
+            class="coil-config-panel"
+            :style="{ '--coil-config-value-font-size': $styleStore.magneticBuilder.inputFontSize?.['font-size'] ?? $styleStore.magneticBuilder.inputFontSize?.fontSize }"
+        >
             <div class="coil-config-header">
                 <div class="coil-config-header-left">
-                    <i class="fa-solid fa-gears"></i>
+                    <i class="pi pi-cog-wide-connected"></i>
                     <span>Coil Configuration</span>
                 </div>
                 <div class="coil-config-header-right">
                     <button
-                        v-if="!$stateStore.hasCurrentApplicationMirroredWindings()"
+                        v-if="!masStore.hasMirroredWindings"
                         type="button"
                         :disabled="!enableSubmenu || loading"
                         :class="['coil-config-header-btn', showAlignmentOptions ? 'coil-config-header-btn-primary' : 'coil-config-header-btn-outline']"
                         @click="swapShowAlignmentOptions(!showAlignmentOptions)"
                     >
-                        <i class="fa-solid fa-align-center"></i>
+                        <i class="pi pi-align-center"></i>
                         <span>Alignment</span>
                     </button>
                     <button
@@ -803,7 +836,7 @@ export default {
                         :class="['coil-config-header-btn', showInsulationOptions ? 'coil-config-header-btn-primary' : 'coil-config-header-btn-outline']"
                         @click="swapShowInsulationOptions(!showInsulationOptions)"
                     >
-                        <i class="fa-solid fa-shield-halved"></i>
+                        <i class="pi pi-shield"></i>
                         <span>Insulation</span>
                     </button>
                 </div>
@@ -814,21 +847,28 @@ export default {
                     class="row mb-3"
                     :style="(imageUpToDate? 'opacity: 100%;' : 'opacity: 20%;') + ' max-height: 50vh;'"
                 >
-                    <Magnetic2DVisualizer
-                        :modelValue="masStore.mas"
-                        :forceUpdate="forceUpdateVisualizer"
-                        :operatingPointIndex="operatingPointIndex"
-                        :enableZoom="false"
-                        :enableOptions="false"
-                        :enableHideOnFitting="enableSimulation"
-                        :coilFits="true"
-                        :plotModeInit="$stateStore.magnetic2DVisualizerState.plotMode"
-                        :includeFringingInit="$stateStore.magnetic2DVisualizerState.includeFringing"
-                        :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || '#1a1a1a'"
-                        :textColor="$styleStore.magneticBuilder.inputTextColor?.color || 'var(--bs-white)'"
-                        :buttonStyle="$styleStore.magneticBuilder.coilVisualizerButton"
-                        @plotModeChange="$emit('plotModeChange', $event)"
-                        @swapIncludeFringing="$emit('swapIncludeFringing', $event)"
+                     <Magnetic2DVisualizer
+                         :modelValue="masStore.mas"
+                         :forceUpdate="forceUpdateVisualizer"
+                         :operatingPointIndex="operatingPointIndex"
+                         :enableZoom="false"
+                         :enableOptions="false"
+                         :enableHideOnFitting="enableSimulation"
+                         :coilFits="true"
+                         :plotModeInit="$stateStore.magnetic2DVisualizerState.plotMode"
+                         :includeFringingInit="$stateStore.magnetic2DVisualizerState.includeFringing"
+                         :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || 'var(--p-dark)'"
+                         :textColor="$styleStore.magneticBuilder.inputTextColor?.color || 'var(--p-white)'"
+                         :buttonStyle="$styleStore.magneticBuilder.coilVisualizerButton"
+                         :insulationColor="$styleStore.magneticBuilder.painterColorInsulation || '0xfff05b'"
+                         :marginColor="$styleStore.magneticBuilder.painterColorMargin || '0xfff05b'"
+                         :spacerColor="$styleStore.magneticBuilder.painterColorSpacer || '0x3b3b3b'"
+                         :ferriteColor="$styleStore.magneticBuilder.painterColorFerrite || '0x7b7c7d'"
+                         :copperColor="$styleStore.magneticBuilder.painterColorCopper || '0xb87333'"
+                         :drawSpacer="$styleStore.magneticBuilder.painterDrawSpacer !== undefined ? $styleStore.magneticBuilder.painterDrawSpacer : true"
+                         :enableTemperaturePlot="enableTemperaturePlot"
+                         @plotModeChange="$emit('plotModeChange', $event)"
+                         @swapIncludeFringing="$emit('swapIncludeFringing', $event)"
                         @errorInImage="$emit('errorInImage')"
                         :loadingGif="$settingsStore.loadingGif"
                     />
@@ -842,25 +882,25 @@ export default {
                         class="builder-action-btn builder-action-btn-outline"
                         @click="showParasiticsView"
                     >
-                        <i class="fa-solid fa-wave-square me-2"></i>Advanced Parasitics
+                        <i class="pi pi-volume-up mr-2"></i>Advanced Parasitics
                     </button>
 
                     <button
-                        v-if="enableSimulation"
+                        v-if="enableSimulation && enableTemperaturePlot"
                         :disabled="masStore.mas.magnetic == null || masStore.mas.magnetic.core == null || masStore.mas.magnetic.core.functionalDescription.shape == ''"
                         :data-cy="dataTestLabel + '-Coil-ToggleTemperaturePlot-button'"
                         :class="['builder-action-btn', $stateStore.magnetic2DVisualizerState.plotMode === 'temperature_field' ? 'builder-action-btn-primary' : 'builder-action-btn-ghost']"
                         @click="toggleTemperaturePlot"
                     >
-                        <i class="fa-solid fa-temperature-half me-2 temp-icon"></i>{{ $stateStore.magnetic2DVisualizerState.plotMode === 'temperature_field' ? 'Hide Temperature' : 'Show Temperature' }}
+                        <i class="pi pi-sun mr-2 temp-icon"></i>{{ $stateStore.magnetic2DVisualizerState.plotMode === 'temperature_field' ? 'Hide Temperature' : 'Show Temperature' }}
                     </button>
                 </div>
 
-                <div class="coil-config-grid">
+                <div v-if="showInterleavingOrder || masStore.mas.magnetic.core.functionalDescription.shape.family != 't'" class="coil-config-grid">
                     <div v-if="masStore.mas.magnetic.core.functionalDescription.shape.family != 't'" class="coil-config-cell coil-config-cell-wide">
                         <Dimension 
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :name="'bobbinWallThickness'"
                             :replaceTitle="'Wall Thickness'"
                             :unit="'m'"
@@ -873,7 +913,7 @@ export default {
                             :allowZero="true"
                             :modelValue="localData"
                             :forceUpdate="forceUpdate"
-                            :styleClassInput="'offset-3 col-6'"
+                            :styleClassInput="'col-offset-3 col-6'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -885,7 +925,7 @@ export default {
                     <div v-if="masStore.mas.magnetic.core.functionalDescription.shape.family != 't'" class="coil-config-cell coil-config-cell-wide">
                         <Dimension 
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :name="'bobbinColumnThickness'"
                             :replaceTitle="'Column Thickness'"
                             :unit="'m'"
@@ -898,7 +938,7 @@ export default {
                             :allowZero="true"
                             :modelValue="localData"
                             :forceUpdate="forceUpdate"
-                            :styleClassInput="'offset-3 col-6'"
+                            :styleClassInput="'col-offset-3 col-6'"
                             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -907,12 +947,12 @@ export default {
                             @update="bobbinUpdated"
                         />
                     </div>
-                    <div v-if="!loading && masStore.mas.magnetic.coil.functionalDescription.length > 1" class="coil-config-cell coil-config-cell-wide">
+                    <div v-if="showInterleavingOrder && !loading && masStore.mas.magnetic.coil.functionalDescription.length > 1" class="coil-config-cell coil-config-cell-wide">
                         <img :data-cy="dataTestLabel + '-BasicCoilSelector-loading'" v-if="loading" class="mx-auto d-block col-12" alt="loading" style="width: 60%; height: auto;" :src="$settingsStore.loadingGif">
                         <ListOfCharacters
                             v-tooltip="tooltipsMagneticBuilder.sectionsInterleaving"
                             :disabled="readOnly"
-                            class="text-start"
+                            class="text-left"
                             :dataTestLabel="dataTestLabel + '-SectionsInterleaving'"
                             :modelValue="localData.pattern" 
                             @updateModelValue="localData.pattern = $event"
@@ -943,19 +983,11 @@ export default {
                     :sectionsOrientation="localData.sectionsOrientation"
                 />
 
-                <BasicCoilSubmenu
-                    v-if="enableSubmenu"
-                    :readOnly="readOnly"
-                    class="col-12 mb-1 text-start"
-                    :dataTestLabel="dataTestLabel + '-BasicCoreSubmenu'"
-                    :enableCustomize="false"
-                    @customizeCore="customizeCoil"
-                />
             </div>
         </div>
                
         <BasicCoilSectionAlignmentSelector
-            v-if="!$stateStore.hasCurrentApplicationMirroredWindings()"
+            v-if="!masStore.hasMirroredWindings"
             :data="localData"
             :showAlignmentOptions="showAlignmentOptions"
             :masStore="masStore"
@@ -977,12 +1009,12 @@ export default {
 
 <style scoped>
 .coil-config-panel {
-    background: linear-gradient(145deg, rgba(var(--bs-primary-rgb), 0.06) 0%, rgba(var(--bs-primary-rgb), 0.02) 100%);
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.15);
+    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
+    border: 1px solid rgba(120, 120, 120, 0.2);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.25rem 0;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    box-shadow: 0 4px 20px rgba(var(--p-black-rgb), 0.12), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
     overflow: hidden;
 }
 
@@ -991,11 +1023,11 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.6rem 0.9rem;
-    background: rgba(var(--bs-primary-rgb), 0.1);
-    border-bottom: 1px solid rgba(var(--bs-primary-rgb), 0.12);
+    background: rgba(120, 120, 120, 0.1);
+    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
     font-weight: 600;
     font-size: 0.9rem;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     letter-spacing: 0.02em;
 }
 
@@ -1007,7 +1039,7 @@ export default {
 
 .coil-config-header-left i {
     font-size: 0.95rem;
-    filter: drop-shadow(0 0 4px rgba(var(--bs-primary-rgb), 0.35));
+    filter: drop-shadow(0 0 3px rgba(var(--p-black-rgb), 0.12));
 }
 
 .coil-config-header-right {
@@ -1043,29 +1075,29 @@ export default {
 
 .coil-config-header-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-primary) 115%, transparent 0%) 0%,
-        var(--bs-primary) 55%,
-        rgb(var(--bs-primary-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 1px solid color-mix(in srgb, var(--bs-primary) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
+        var(--p-primary) 55%,
+        rgb(var(--p-primary-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--bs-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--bs-primary-rgb) / 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
+        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
+        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .coil-config-header-btn-outline {
-    background: rgb(var(--bs-primary-rgb) / 0.2);
-    border: 1px solid rgb(var(--bs-primary-rgb) / 0.55);
-    color: var(--bs-primary);
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    background: rgb(var(--p-primary-rgb) / 0.2);
+    border: 1px solid rgb(var(--p-primary-rgb) / 0.55);
+    color: var(--p-primary);
+    box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.2);
 }
 
 .coil-config-header-btn-outline:hover {
-    background: rgb(var(--bs-primary-rgb) / 0.3);
-    border-color: rgb(var(--bs-primary-rgb) / 0.75);
-    box-shadow: 0 2px 6px rgb(var(--bs-primary-rgb) / 0.25);
+    background: rgb(var(--p-primary-rgb) / 0.3);
+    border-color: rgb(var(--p-primary-rgb) / 0.75);
+    box-shadow: 0 2px 6px rgb(var(--p-primary-rgb) / 0.25);
 }
 
 .coil-config-body {
@@ -1076,9 +1108,19 @@ export default {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.15rem;
-    background: var(--bs-dark);
+    background: var(--p-dark);
     border-radius: 10px;
     padding: 0.35rem;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+}
+
+.coil-config-cell {
+    box-sizing: border-box;
+    min-width: 0;
+    overflow: hidden;
 }
 
 @media (max-width: 576px) {
@@ -1099,6 +1141,83 @@ export default {
 .coil-config-cell :deep(.form-label),
 .coil-config-cell :deep(label) {
     padding-left: 0.35rem !important;
+    text-align: start !important;
+}
+
+/* Wall Thickness / Column Thickness / Interleaving Order rows: same
+ * layout discipline as core/wire — labels auto-sized + right-aligned,
+ * value column pinned to right at fixed 50%, no overlap, no truncation. */
+.coil-config-cell-wide :deep(.dim-row),
+.coil-config-cell-wide :deep(.loc-row) {
+    display: flex;
+    align-items: center;
+    column-gap: 0.5rem;
+    flex-wrap: nowrap;
+    width: 100%;
+}
+.coil-config-cell-wide :deep(.dim-row > label.dim-label),
+.coil-config-cell-wide :deep(.loc-row > label.loc-label) {
+    flex: 0 0 auto !important;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    text-align: start !important;
+}
+.coil-config-cell-wide :deep(.dim-value-row),
+.coil-config-cell-wide :deep(.loc-input) {
+    flex: 0 0 50% !important;
+    width: 50% !important;
+    max-width: 50% !important;
+    margin-left: auto !important;
+    box-sizing: border-box;
+}
+.coil-config-cell-wide :deep(.dwt-unit-addon),
+.coil-config-cell-wide :deep(.dim-unit) {
+    width: 3.5rem !important;
+    min-width: 3.5rem !important;
+    max-width: 3.5rem !important;
+    flex: 0 0 3.5rem !important;
+}
+.coil-config-cell-wide :deep(.p-inputnumber),
+.coil-config-cell-wide :deep(.p-inputgroup) {
+    width: 100%;
+    min-width: 0;
+}
+.coil-config-cell-wide :deep(.p-inputgroup) {
+    max-width: 100%;
+    flex-wrap: nowrap;
+}
+.coil-config-cell-wide :deep(.p-inputgroup .p-inputnumber) {
+    flex: 1 1 0;
+    min-width: 0;
+}
+.coil-config-cell-wide :deep(.p-inputgroup .p-inputnumber input) {
+    width: 100%;
+    min-width: 0;
+}
+.coil-config-cell-wide :deep(.p-inputgroup-addon),
+.coil-config-cell-wide :deep(.dwt-unit-addon) {
+    flex: 0 0 auto;
+    max-width: 4.5rem;
+}
+/* Match input font size to the surrounding DimensionReadOnly value text.
+ * Inherit from the parent's :style="valueFontSize" instead of overriding
+ * with a hardcoded small size. */
+.coil-config-cell-wide :deep(.loc-input) {
+    min-height: 2rem;
+    padding: 0 0.4rem;
+    font-size: var(--coil-config-value-font-size, 1.15rem) !important;
+}
+.coil-config-cell-wide :deep(.p-inputnumber-input),
+.coil-config-cell-wide :deep(.p-inputnumber input),
+.coil-config-cell-wide :deep(input.p-inputtext),
+.coil-config-cell-wide :deep(.p-select-label),
+.coil-config-cell-wide :deep(.dwt-unit-addon),
+.coil-config-cell-wide :deep(.dim-unit) {
+    font-size: var(--coil-config-value-font-size, 1.15rem) !important;
 }
 
 .builder-actions {
@@ -1138,33 +1257,33 @@ export default {
 
 .builder-action-btn-primary {
     background: linear-gradient(135deg,
-        color-mix(in srgb, var(--bs-success) 115%, transparent 0%) 0%,
-        var(--bs-success) 55%,
-        rgb(var(--bs-success-rgb) / 0.85) 100%);
-    color: var(--bs-white);
-    border: 2px solid color-mix(in srgb, var(--bs-success) 70%, var(--bs-white) 30%);
+        color-mix(in srgb, var(--p-success) 115%, transparent 0%) 0%,
+        var(--p-success) 55%,
+        rgb(var(--p-success-rgb) / 0.85) 100%);
+    color: var(--p-white);
+    border: 2px solid color-mix(in srgb, var(--p-success) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 2px rgb(var(--bs-success-rgb) / 0.35),
-        0 4px 14px rgb(var(--bs-success-rgb) / 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+        0 0 0 2px rgb(var(--p-success-rgb) / 0.35),
+        0 4px 14px rgb(var(--p-success-rgb) / 0.5),
+        inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
+    text-shadow: 0 1px 2px rgba(var(--p-black-rgb), 0.25);
 }
 
 .builder-action-btn-outline {
-    background: rgb(var(--bs-primary-rgb) / 0.2);
-    border: 1px solid rgb(var(--bs-primary-rgb) / 0.55);
-    color: var(--bs-primary);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    background: rgb(var(--p-primary-rgb) / 0.2);
+    border: 1px solid rgb(var(--p-primary-rgb) / 0.55);
+    color: var(--p-primary);
+    box-shadow: 0 2px 6px rgba(var(--p-black-rgb), 0.2);
 }
 
 .builder-action-btn-ghost {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    color: rgba(255, 255, 255, 0.9);
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    background: rgba(var(--p-white-rgb), 0.08);
+    border: 1px solid rgba(var(--p-white-rgb), 0.28);
+    color: rgba(var(--p-white-rgb), 0.9);
+    box-shadow: 0 2px 6px rgba(var(--p-black-rgb), 0.2);
 }
 
 .temp-icon {
-    color: var(--bs-danger);
+    color: var(--p-danger);
 }
 </style>

@@ -1,4 +1,5 @@
 <script setup>
+import { GapType } from '../../../../assets/ts/MAS.ts'
 import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.vue'
 import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
@@ -17,6 +18,7 @@ import { useTaskQueueStore } from '../../../../stores/taskQueue'
 <script>
 
 export default {
+    emits: ["errorInDimensions", "renderSuccess"],
     props: {
         dataTestLabel: {
             type: String,
@@ -179,6 +181,9 @@ export default {
         errorInDimensions() {
             this.errorMessage = "There is an error in the dimensions, please review them";
         },
+        clearError() {
+            this.errorMessage = "";
+        },
         gapTypeChanged(newType, columnIndex) {
             if (newType == "Spacer") {
                 this.setSpacer(columnIndex);
@@ -209,7 +214,7 @@ export default {
             })
             this.reorderedColumns.forEach((elem) => {
                 this.core.functionalDescription.gapping[elem.gaps[0].index].length = firstGapInColumnLength;
-                this.core.functionalDescription.gapping[elem.gaps[0].index].type = "additive";
+                this.core.functionalDescription.gapping[elem.gaps[0].index].type = GapType.Additive;
                 this.core.functionalDescription.gapping[elem.gaps[0].index].coordinates[1] = 0;
             })
             this.forceUpdate += 1;
@@ -219,7 +224,7 @@ export default {
                 if (elem.type == "Spacer") {
                     elem.type = "Ungapped";
                     this.core.functionalDescription.gapping[elem.gaps[0].index].length = this.engineConstants['residualGap'];
-                    this.core.functionalDescription.gapping[elem.gaps[0].index].type = "subtractive";
+                    this.core.functionalDescription.gapping[elem.gaps[0].index].type = GapType.Subtractive;
                 }
             })
             this.forceUpdate += 1;
@@ -229,7 +234,7 @@ export default {
             for (let i = this.reorderedColumns[columnIndex].gaps.length - 1; i >= 1; i--) {
                 this.removeGap(this.reorderedColumns[columnIndex].gaps[i].index);
             }
-            this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].type = "subtractive";
+            this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].type = GapType.Subtractive;
             this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].length = this.engineConstants['residualGap'];
             this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].coordinates[1] = 0;
             this.forceUpdate += 1;
@@ -237,7 +242,7 @@ export default {
         setDistributed(columnIndex) {
             this.unsetSpacer();
             const numberDistributedGaps = 3;
-            this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].type = "subtractive";
+            this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].type = GapType.Subtractive;
             this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].length = this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].length / numberDistributedGaps;
             this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].coordinates[1] = 0;
             for (let i = numberDistributedGaps - 2; i >= 0; i--) {
@@ -250,7 +255,7 @@ export default {
             for (let i = this.reorderedColumns[columnIndex].gaps.length - 1; i >= 1; i--) {
                 this.removeGap(this.reorderedColumns[columnIndex].gaps[i].index);
             }
-            this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].type = "subtractive";
+            this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].type = GapType.Subtractive;
             const length = this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].length;
             this.core.functionalDescription.gapping[this.reorderedColumns[columnIndex].gaps[0].index].coordinates[1] = length / 2;
             this.forceUpdate += 1;
@@ -445,7 +450,7 @@ export default {
             <div
                 v-for="(gapsPerColumn, columnIndex) in reorderedColumns"
                 :key="'column-' + columnIndex"
-                class="column-container col-sm-4 col-md-3 row mb-1 text-center mx-0"
+                class="column-container col-4 md:col-3 row mb-1 text-center mx-0"
                 :style="{'background-image': `url(${columnImages[columnIndex]}`}"
             >
                 <div>
@@ -456,15 +461,15 @@ export default {
                         {{columnNames[columnIndex]}}
                     </label>
                     <ElementFromList
-                        class="col-12 px-4 mb-3 text-start"
+                        class="col-12 px-4 mb-3 text-left"
                         :dataTestLabel="dataTestLabel + '-GapType'"
                         :name="'type'"
                         :titleSameRow="true"
                         :justifyContent="true"
                         v-model="reorderedColumns[columnIndex]"
                         :options="gapTypesWithoutCustom"
-                        :labelWidthProportionClass="'col-sm-12 col-md-4'"
-                        :valueWidthProportionClass="'col-sm-12 col-md-8'"
+                        :labelWidthProportionClass="'col-12 md:col-4'"
+                        :valueWidthProportionClass="'col-12 md:col-8'"
                         :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
                         :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
                         :labelBgColor="{'background': 'transparent'}"
@@ -479,7 +484,7 @@ export default {
                         <button
                             :style="$styleStore.magneticBuilder.addButton"
                             :data-cy="dataTestLabel + 'add-gap-button'"
-                            class="btn col-sm-12 col-md-6 px-0"
+                            class="btn col-12 md:col-6 px-0"
                             @click="addGap(columnIndex)"
 
                         >
@@ -488,7 +493,7 @@ export default {
                         <button
                             :style="$styleStore.magneticBuilder.utilityButton"
                             :data-cy="dataTestLabel + 'add-gap-button'"
-                            class="btn col-sm-12 col-md-6 px-0"
+                            class="btn col-12 md:col-6 px-0"
                             @click="autoDistributeGaps(columnIndex)"
 
                         >
@@ -498,7 +503,7 @@ export default {
                     <div
                         v-for="(gap, gapIndex) in gapsPerColumn.gaps"
                         :key="'gap-' + gapIndex"
-                        class="col-12 mb-1 px-2 text-start"
+                        class="col-12 mb-1 px-2 text-left"
                     >
                         <AdvancedCoreSelectorGap 
                             :dataTestLabel="dataTestLabel + '-AdvancedCoreSelectorGap-' + gap.index"
@@ -517,7 +522,7 @@ export default {
                     </div>
                 </div>
             </div>
-            <div class="col-sm-12 col-md-3">
+            <div class="col-12 md:col-3">
                 <h3 class= "mb-3"> {{'3D model'}} </h3>
                 <div
                     v-if="core.functionalDescription != null"
@@ -532,17 +537,34 @@ export default {
                         :fullCoreModel="true"
                         :loadingGif="$settingsStore.loadingGif"
                         :backgroundColor="$styleStore.magneticBuilder.main['background-color']"
-                        @errorInDimensions="$emit('errorInDimensions')"
+                        @errorInDimensions="errorInDimensions"
+                        @renderSuccess="clearError"
                     />
                 </div>
                 <h3 class= "mb-3"> {{'Technical Drawing'}} </h3>
                 <div
                     v-if="core.functionalDescription != null"
-                    class="border-bottom border-top row text-start py-2"
+                    class="row"
+                    :style="imageUpToDate? 'opacity: 100%;' : 'opacity: 20%;'"
+                >
+                    <Core2DVisualizer
+                        :dataTestLabel="`${dataTestLabel}-Core2DVisualizerGapping`"
+                        :core="localCoreToDraw"
+                        :forceUpdate="forceUpdate3DCore"
+                        :gappingMode="true"
+                        :loadingGif="$settingsStore.loadingGif"
+                        :backgroundColor="$styleStore.magneticBuilder.main['background-color']"
+                        @errorInDimensions="errorInDimensions"
+                        @renderSuccess="clearError"
+                    />
+                </div>
+                <div
+                    v-if="core.functionalDescription != null"
+                    class="border-bottom border-top row text-left py-2"
                     :style="dataUpToDate? 'opacity: 100%;' : 'opacity: 20%;'"
                 >
                     <DimensionReadOnly 
-                        class="col-12 pe-4 ps-3"
+                        class="col-12 pr-4 pl-3"
                         :name="'μ'"
                         :subscriptName="'ini'"
                         :unit="null"
@@ -561,7 +583,7 @@ export default {
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
                     />
                     <DimensionReadOnly 
-                        class="col-12 pe-4 ps-3"
+                        class="col-12 pr-4 pl-3"
                         :name="'μ'"
                         :subscriptName="'eff'"
                         :unit="null"
@@ -580,7 +602,7 @@ export default {
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
                     />
                     <DimensionReadOnly 
-                        class="col-12 pe-4 ps-3"
+                        class="col-12 pr-4 pl-3"
                         :name="'A'"
                         :subscriptName="'L ungap.'"
                         :unit="'H/tu²'"
@@ -599,7 +621,7 @@ export default {
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
                     />
                     <DimensionReadOnly 
-                        class="col-12 pe-4 ps-3"
+                        class="col-12 pr-4 pl-3"
                         :name="'A'"
                         :subscriptName="'L gap.'"
                         :unit="'H/tu²'"

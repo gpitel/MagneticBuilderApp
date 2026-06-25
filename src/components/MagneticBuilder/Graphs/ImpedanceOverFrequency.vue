@@ -29,14 +29,14 @@ export default {
                 x: [0, 1],
                 y: [0, 1],
             },
-            colorLabel: '#b18aea',
+            colorLabel: getComputedStyle(document.documentElement).getPropertyValue('--p-primary').trim() || 'var(--p-primary)',
             type: 'log', // log or value
             position: 'left',
             unit: 'Ω',
         }]
         const frequencyData = {
             label: 'Frequency',
-            colorLabel: '#d4d4d4',
+            colorLabel: getComputedStyle(document.documentElement).getPropertyValue('--p-secondary').trim() || 'var(--p-secondary)',
             type: 'log', // log or value
             unit: 'Hz',
         }
@@ -65,17 +65,29 @@ export default {
         impedancePoints() {
             const points = [];
             if (this.masStore.mas.inputs.designRequirements.minimumImpedance != null) {
+                // The CMC-inputs builder can emit several entries at the same
+                // frequency (the user's requirement + a derived/margined one), and
+                // impedance.magnitude is a DimensionWithTolerance ({nominal,…})
+                // after autocomplete. Collapse to one point per frequency, keeping
+                // the smallest |Z| — the user's un-margined requirement (e.g. the
+                // entered 1 kΩ, not the derived 1.53 kΩ) — so it matches the input.
+                const reqByFrequency = new Map();
                 this.masStore.mas.inputs.designRequirements.minimumImpedance.forEach((elem) => {
+                    const mag = elem.impedance.magnitude;
+                    const y = (mag != null && typeof mag === 'object')
+                        ? (mag.nominal ?? mag.minimum ?? mag.maximum)
+                        : mag;
+                    if (y == null) return;
+                    const prev = reqByFrequency.get(elem.frequency);
+                    if (prev == null || y < prev) reqByFrequency.set(elem.frequency, y);
+                });
+                reqByFrequency.forEach((y, x) => {
                     points.push({
-                        data: {
-                            x: elem.frequency,
-                            y: elem.impedance.magnitude
-                        },
+                        data: { x, y },
                         unit: 'Ω',
                         colorLabel: 'danger',
-
                     });
-                })
+                });
             }
             return points;
         }
@@ -182,13 +194,13 @@ export default {
 
 <template>
     <div class="graph-wrapper">
-        <div class="row g-3">
-            <div class="col-12 col-md-3">
+        <div class="grid">
+            <div class="col-12 md:col-3">
                 <div class="graph-params">
                     <slot/>
                 </div>
             </div>
-            <div class="col-12 col-md-9 graph-viz-col">
+            <div class="col-12 md:col-9 graph-viz-col">
 
                 <img :data-cy="dataTestLabel + '-ResistancesOverFrequency-loading'" v-if="loading" class="mx-auto d-block graph-loading" alt="loading" :src="$settingsStore.loadingGif">
                 <label v-if="errorMessage != ''" :data-cy="dataTestLabel + '-BottomOrRightMarginErrorMessage'" class="text-danger m-0" style="font-size: 0.9em"> {{errorMessage}}</label>
@@ -202,6 +214,8 @@ export default {
                     :forceUpdate="forceUpdate"
                     :bgColor="$styleStore.magneticBuilder.graphBgColor['background-color']"
                     :lineColor="$styleStore.magneticBuilder.graphLineColor.color"
+                    :showPoints="false"
+                    :tooltipTrigger="'axis'"
                     :pointsColor="$styleStore.magneticBuilder.graphPointsColor.color"
                     :textColor="$styleStore.magneticBuilder.inputTextColor.color"
                 />
@@ -216,8 +230,8 @@ export default {
 }
 
 .graph-params {
-    background: rgba(var(--bs-light-rgb), 0.04);
-    border: 1px solid rgba(var(--bs-light-rgb), 0.1);
+    background: rgba(var(--p-white-rgb), 0.04);
+    border: 1px solid rgba(var(--p-white-rgb), 0.1);
     border-radius: 12px;
     padding: 0.6rem 0.55rem;
     display: flex;

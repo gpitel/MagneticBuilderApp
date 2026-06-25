@@ -1,5 +1,5 @@
-<script setup >
-import { Modal } from "bootstrap";
+<script setup>
+import Dialog from 'primevue/dialog'
 import { useMagneticBuilderSettingsStore } from '../../stores/magneticBuilderSettings'
 import { useModelSettingsStore } from '../../stores/modelSettings'
 import { useStateStore } from '../../stores/state'
@@ -9,7 +9,8 @@ import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
 <script>
 
 export default {
-    emits: ["onSettingsUpdated"],
+    components: { Dialog },
+    emits: ["onSettingsUpdated", "update:visible"],
     props: {
         dataTestLabel: {
             type: String,
@@ -23,6 +24,7 @@ export default {
             type: Object,
             default: null,
         },
+        visible: { type: Boolean, default: false },
     },
     data() {
         const magneticBuilderSettingsStore = useMagneticBuilderSettingsStore();
@@ -75,7 +77,7 @@ export default {
             console.log('[Settings] Model changed, waiting for watcher to trigger resimulation...');
         },
         onSettingsUpdated(event) {
-            this.$refs.closeSettingsModalRef.click();
+            this.$emit('update:visible', false);
             this.$emit('onSettingsUpdated');
         },
         handleModelChange(chosen, name) {
@@ -174,17 +176,21 @@ export default {
 
 
 <template>
-    <div class="modal fade" :id="modalName" tabindex="-1" :aria-labelledby="modalName + '-settingsModalLabel'" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-centered settings">
-            <div class="modal-content bg-dark border-0 shadow-lg">
-                <div class="modal-header border-bottom border-secondary px-4 py-3">
-                    <div class="d-flex align-items-center">
-                        <i class="fa-solid fa-gear text-primary me-2 fs-5"></i>
-                        <h5 :data-cy="dataTestLabel + '-settingsModal-notification-text'" class="modal-title text-white mb-0" :id="modalName + '-settingsModalLabel'">Settings</h5>
-                    </div>
-                    <button ref="closeSettingsModalRef" type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="settingsModalClose"></button>
-                </div>
-                <div class="modal-body px-4 py-4">
+    <Dialog
+        :visible="visible"
+        @update:visible="(v) => $emit('update:visible', v)"
+        :modal="true"
+        :draggable="false"
+        :data-cy="modalName"
+        :style="{ width: 'min(90vw, 720px)' }"
+        :pt="{ root: { class: 'settings' } }">
+        <template #header>
+            <div class="d-flex align-items-center">
+                <i class="pi pi-cog text-primary mr-2 text-xl"></i>
+                <h5 :data-cy="dataTestLabel + '-settingsModal-notification-text'" class="modal-title text-white mb-0">Settings</h5>
+            </div>
+        </template>
+        <div class="px-2 py-2">
                     <!-- Visualization Setting -->
                     <div class="setting-item d-flex justify-content-between align-items-center py-3 border-bottom border-secondary">
                         <div>
@@ -260,7 +266,7 @@ export default {
                     <!-- Simulation Models Section -->
                     <div class="mt-4">
                         <h6 class="text-white mb-3 border-bottom border-secondary pb-2">
-                            <i class="fa-solid fa-calculator text-primary me-2"></i>
+                            <i class="pi pi-calculator text-primary mr-2"></i>
                             Simulation Models
                         </h6>
                         <small class="text-secondary d-block mb-3">Select the calculation models used in simulations (loaded from MKF)</small>
@@ -278,7 +284,7 @@ export default {
                                 <div class="d-flex justify-content-between align-items-center">
                                     <div>
                                         <label class="text-white mb-1 d-block">Manual Wire Losses Models</label>
-                                        <small class="text-muted">Override automatic model selection for windings</small>
+                                        <small class="text-color-secondary">Override automatic model selection for windings</small>
                                     </div>
                                     <div class="form-check form-switch">
                                         <input 
@@ -303,11 +309,11 @@ export default {
                                     v-model="modelSettingsStore"
                                     :labelWidthProportionClass="'col-0'"
                                     :valueWidthProportionClass="'col-12'"
-                                    :valueBgColor="'transparent'"
-                                    :textColor="'white'"
+                                    :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                                    :textColor="'var(--p-white)'"
                                      @update="handleModelChange"
                                 />
-                                <small class="text-muted">Used for magnetic field visualization and calculations</small>
+                                <small class="text-color-secondary">Used for magnetic field visualization and calculations</small>
                             </div>
 
                             <!-- Fringing Effect Model -->
@@ -321,11 +327,11 @@ export default {
                                     v-model="modelSettingsStore"
                                     :labelWidthProportionClass="'col-0'"
                                     :valueWidthProportionClass="'col-12'"
-                                    :valueBgColor="'transparent'"
-                                    :textColor="'white'"
+                                    :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                                    :textColor="'var(--p-white)'"
                                      @update="handleModelChange"
                                 />
-                                <small class="text-muted">Used for gap fringing field calculations</small>
+                                <small class="text-color-secondary">Used for gap fringing field calculations</small>
                             </div>
 
                             <!-- Reluctance Model -->
@@ -339,11 +345,11 @@ export default {
                                     v-model="modelSettingsStore"
                                     :labelWidthProportionClass="'col-0'"
                                     :valueWidthProportionClass="'col-12'"
-                                    :valueBgColor="'transparent'"
-                                    :textColor="'white'"
+                                    :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                                    :textColor="'var(--p-white)'"
                                      @update="handleModelChange"
                                 />
-                                <small class="text-muted">Used for magnetic circuit reluctance calculations</small>
+                                <small class="text-color-secondary">Used for magnetic circuit reluctance calculations</small>
                             </div>
 
                             <!-- Core Losses Model -->
@@ -357,15 +363,15 @@ export default {
                                     v-model="modelSettingsStore"
                                     :labelWidthProportionClass="'col-0'"
                                     :valueWidthProportionClass="'col-12'"
-                                    :valueBgColor="'transparent'"
-                                    :textColor="isCoreLossesDisabled ? 'gray' : 'white'"
+                                    :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                                    :textColor="isCoreLossesDisabled ? 'var(--p-secondary)' : 'var(--p-white)'"
                                     :disabled="isCoreLossesDisabled"
                                      @update="handleModelChange"
                                 />
-                                <small class="text-muted" v-if="modelSettingsStore.availableCoreLossesMethodsError">
+                                <small class="text-color-secondary" v-if="modelSettingsStore.availableCoreLossesMethodsError">
                                     {{ modelSettingsStore.availableCoreLossesMethodsError }}
                                 </small>
-                                <small class="text-muted" v-else>
+                                <small class="text-color-secondary" v-else>
                                     Used for core loss calculations
                                 </small>
                             </div>
@@ -381,12 +387,12 @@ export default {
                                     v-model="modelSettingsStore"
                                     :labelWidthProportionClass="'col-0'"
                                     :valueWidthProportionClass="'col-12'"
-                                    :valueBgColor="'transparent'"
-                                    :textColor="modelSettingsStore.coilEnableUserWindingLossesModels ? 'white' : 'gray'"
+                                    :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                                    :textColor="modelSettingsStore.coilEnableUserWindingLossesModels ? 'var(--p-white)' : 'var(--p-secondary)'"
                                     :disabled="!modelSettingsStore.coilEnableUserWindingLossesModels"
                                      @update="handleModelChange"
                                 />
-                                <small class="text-muted">Used for skin effect loss calculations</small>
+                                <small class="text-color-secondary">Used for skin effect loss calculations</small>
                             </div>
 
                             <!-- Winding Proximity Effect Losses Model -->
@@ -400,12 +406,12 @@ export default {
                                     v-model="modelSettingsStore"
                                     :labelWidthProportionClass="'col-0'"
                                     :valueWidthProportionClass="'col-12'"
-                                    :valueBgColor="'transparent'"
-                                    :textColor="modelSettingsStore.coilEnableUserWindingLossesModels ? 'white' : 'gray'"
+                                    :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                                    :textColor="modelSettingsStore.coilEnableUserWindingLossesModels ? 'var(--p-white)' : 'var(--p-secondary)'"
                                     :disabled="!modelSettingsStore.coilEnableUserWindingLossesModels"
                                      @update="handleModelChange"
                                 />
-                                <small class="text-muted">Used for proximity effect loss calculations</small>
+                                <small class="text-color-secondary">Used for proximity effect loss calculations</small>
                             </div>
 
                             <!-- Stray Capacitance Model -->
@@ -419,11 +425,11 @@ export default {
                                     v-model="modelSettingsStore"
                                     :labelWidthProportionClass="'col-0'"
                                     :valueWidthProportionClass="'col-12'"
-                                    :valueBgColor="'transparent'"
-                                    :textColor="'white'"
+                                    :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                                    :textColor="'var(--p-white)'"
                                      @update="handleModelChange"
                                 />
-                                <small class="text-muted">Used for stray capacitance calculations</small>
+                                <small class="text-color-secondary">Used for stray capacitance calculations</small>
                             </div>
                         </div><!-- End v-else -->
                     </div>
@@ -431,7 +437,7 @@ export default {
                     <!-- Field Plot Resolution Section -->
                     <div class="mt-4">
                         <h6 class="text-white mb-3 border-bottom border-secondary pb-2">
-                            <i class="fa-solid fa-chart-area text-primary me-2"></i>
+                            <i class="pi pi-chart-line text-primary mr-2"></i>
                             Field Plot Resolution
                         </h6>
                         <small class="text-secondary d-block mb-3">Control the grid resolution for magnetic and electric field visualizations</small>
@@ -448,7 +454,7 @@ export default {
                             <div class="model-setting mb-3">
                                 <div class="d-flex justify-content-between align-items-center mb-2">
                                     <label class="text-white mb-0">Horizontal Resolution (X)</label>
-                                    <span class="text-primary fw-bold">{{ modelSettingsStore.painterNumberPointsX }}</span>
+                                    <span class="text-primary font-bold">{{ modelSettingsStore.painterNumberPointsX }}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -458,14 +464,14 @@ export default {
                                     step="5"
                                     v-model.number="modelSettingsStore.painterNumberPointsX"
                                 >
-                                <small class="text-muted">Number of grid points in the horizontal direction (10-200)</small>
+                                <small class="text-color-secondary">Number of grid points in the horizontal direction (10-200)</small>
                             </div>
 
                             <!-- Number of Points Y -->
                             <div class="model-setting mb-3">
                                 <div class="d-flex justify-content-between align-items-center mb-2">
                                     <label class="text-white mb-0">Vertical Resolution (Y)</label>
-                                    <span class="text-primary fw-bold">{{ modelSettingsStore.painterNumberPointsY }}</span>
+                                    <span class="text-primary font-bold">{{ modelSettingsStore.painterNumberPointsY }}</span>
                                 </div>
                                 <input
                                     type="range"
@@ -475,38 +481,33 @@ export default {
                                     step="5"
                                     v-model.number="modelSettingsStore.painterNumberPointsY"
                                 >
-                                <small class="text-muted">Number of grid points in the vertical direction (10-200)</small>
+                                <small class="text-color-secondary">Number of grid points in the vertical direction (10-200)</small>
                             </div>
 
                             <div class="alert alert-dark border-secondary mt-3" role="alert">
-                                <small class="text-muted">
-                                    <i class="fa-solid fa-circle-info me-1"></i>
+                                <small class="text-color-secondary">
+                                    <i class="pi pi-info-circle mr-1"></i>
                                     Higher values produce finer visualizations but may slow down rendering. Default: 25×50
                                 </small>
                             </div>
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer border-top border-secondary px-4 py-3">
-                    <button
-                        :data-cy="dataTestLabel + '-Settings-Modal-reset-defaults-button'"
-                        class="btn btn-outline-secondary px-4 me-2"
-                        @click="resetToDefaults"
-                    >
-                        Reset to Defaults
-                    </button>
-                    <button
-                        :data-cy="dataTestLabel + '-Settings-Modal-update-settings-button'"
-                        class="btn btn-primary px-4"
-                        data-bs-dismiss="modal"
-                        @click="onSettingsUpdated"
-                    >
-                        Done
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
+        <template #footer>
+            <button
+                :data-cy="dataTestLabel + '-Settings-Modal-reset-defaults-button'"
+                class="p-button p-button-outlined p-button-secondary px-4 mr-2"
+                @click="resetToDefaults">
+                Reset to Defaults
+            </button>
+            <button
+                :data-cy="dataTestLabel + '-Settings-Modal-update-settings-button'"
+                class="p-button p-button-primary px-4"
+                @click="onSettingsUpdated">
+                Done
+            </button>
+        </template>
+    </Dialog>
 </template>
 
 
@@ -522,16 +523,16 @@ export default {
 }
 
 .custom-switch:checked {
-    background-color: #0d6efd;
-    border-color: #0d6efd;
+    background-color: var(--p-primary);
+    border-color: var(--p-primary);
 }
 
 .custom-switch:focus {
-    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+    box-shadow: 0 0 0 0.25rem rgba(var(--p-primary-rgb), 0.25);
 }
 
 .setting-item:hover {
-    background-color: rgba(255, 255, 255, 0.03);
+    background-color: rgba(var(--p-white-rgb), 0.03);
     margin-left: -1rem;
     margin-right: -1rem;
     padding-left: 1rem;
@@ -540,7 +541,7 @@ export default {
 }
 
 .model-setting:hover {
-    background-color: rgba(255, 255, 255, 0.03);
+    background-color: rgba(var(--p-white-rgb), 0.03);
     margin-left: -0.5rem;
     margin-right: -0.5rem;
     padding-left: 0.5rem;

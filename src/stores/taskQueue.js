@@ -2,6 +2,71 @@ import { defineStore } from 'pinia'
 import { waitForMkf, isWorkerMode } from '/WebSharedComponents/assets/js/mkfRuntime'
 import { checkAndFixMas, clean, toTitleCase, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
 import { wireMaterialDefault } from '/WebSharedComponents/assets/js/defaults.js'
+import { Convert as MasConvert } from '/WebSharedComponents/assets/ts/MAS.ts'
+import { useSettingsStore } from './settings'
+
+// Returns the restricted shape-family whitelist (lowercase) if set in
+// magneticBuilderSettings, or null when no restriction applies. Defensive
+// against the field being absent in older persisted settings blobs.
+function getRestrictedShapeFamilies() {
+    try {
+        const s = useSettingsStore();
+        const list = s?.magneticBuilderSettings?.restrictedShapeFamilies;
+        if (!Array.isArray(list) || list.length === 0) return null;
+        return list.map(f => String(f).toLowerCase());
+    } catch (_) {
+        return null;
+    }
+}
+
+// MAS sentry. Validates an outgoing payload against the generated MAS schema
+// (via quicktype's `Convert.to*`) before we hand it to the WASM. Loud failure
+// here is far cheaper to diagnose than a generic "Input JSON does not conform
+// to schema!" coming back from C++ MAS.hpp deserialization.
+//
+// `where`: short label for the call site (e.g. "simulate").
+// `obj`:   the JS object we are about to JSON.stringify and send to WASM.
+// `kind`:  one of "Mas" | "Inputs" | "Magnetic" | "Coil" | "Wire".
+//
+// We never silently downgrade — on failure we throw with the full quicktype
+// error message (which includes the offending field path).
+function masSentry(where, obj, kind = 'Mas') {
+    const fn = MasConvert['to' + kind];
+    if (typeof fn !== 'function') {
+        throw new Error(`[MAS sentry @ ${where}] Unknown sentry kind "${kind}" (no Convert.to${kind} in MAS.ts)`);
+    }
+    // Sentry-local cleaner. Recursively strips object keys whose value is
+    // `null`, `"null"`, or `undefined`. Quicktype's optional fields are
+    // decoded as `u(undefined, ...)` and reject explicit `null`. We do NOT
+    // strip empty arrays or empty objects: required array fields (e.g.
+    // `outputs`) must remain present even when empty.
+    function stripNulls(v) {
+        if (Array.isArray(v)) {
+            for (const item of v) stripNulls(item);
+            return v;
+        }
+        if (v && typeof v === 'object') {
+            for (const k of Object.keys(v)) {
+                const val = v[k];
+                if (val === null || val === 'null' || val === undefined) {
+                    delete v[k];
+                } else {
+                    stripNulls(val);
+                }
+            }
+        }
+        return v;
+    }
+    try {
+        const cleaned = stripNulls(JSON.parse(JSON.stringify(obj)));
+        fn(JSON.stringify(cleaned));
+    } catch (e) {
+        const msg = `[MAS sentry @ ${where}/${kind}] Frontend produced invalid payload: ${e.message}`;
+        // eslint-disable-next-line no-console
+        console.error(msg);
+        throw new Error(msg);
+    }
+}
 
 /**
  * Convert Embind vector or array to JS array.
@@ -84,12 +149,29 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const mkf = await waitForMkf();
             await mkf.ready;
 
+            masSentry('masAutocomplete', mas, 'Mas');
             const result = await mkf.mas_autocomplete(JSON.stringify(mas), flag, JSON.stringify(settings));
             if (result.startsWith('Exception')) {
                 setTimeout(() => { this.masAutocompleted(false, result); }, this.task_standard_response_delay);
                 throw new Error(result);
             }
-            const masResult = JSON.parse(result);
+            // Emscripten's musl printf omits the leading "0" for fractional numbers
+            // whose absolute value is in (0, 1) on some WASM builds — both positive
+            // (e.g. 0.95 → ".95") and negative (e.g. -0.0015 → "-.0015") — which is
+            // not valid JSON. Repair before parsing.
+            // eslint-disable-next-line no-console
+            console.warn('[taskQueue] masAutocomplete: sanitizing WASM output (leading-decimal fix active)');
+            const sanitized = result.replace(/([{,\[:][ \t]*)(-?)\.(\d)/g, '$1$2' + '0.$3');
+            let masResult;
+            try {
+                masResult = JSON.parse(sanitized);
+            } catch (parseErr) {
+                // eslint-disable-next-line no-console
+                console.error('[taskQueue] masAutocomplete: JSON.parse still failed after sanitization. First 500 chars of WASM output:', result.substring(0, 500));
+                // eslint-disable-next-line no-console
+                console.error('[taskQueue] masAutocomplete: First 500 chars of sanitized output:', sanitized.substring(0, 500));
+                throw parseErr;
+            }
             setTimeout(() => { this.masAutocompleted(true, masResult); }, this.task_standard_response_delay);
             return masResult;
         },
@@ -191,8 +273,19 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
             else {
                 const cores = JSON.parse(allCoresResult);
-                this.allCoresFromShapesProcessed(true, cores);
-                return cores;
+                // Honour the same shape-family whitelist that filters the
+                // family/shape dropdowns (see getCoreShapes / getCoreShapeFamilies).
+                // Without this the "open core shape table" modal would list
+                // every family in the WASM database even though the rest of
+                // the UI is restricted (e.g. el-choker forces ['t']).
+                const allowed = getRestrictedShapeFamilies();
+                const filtered = allowed
+                    ? cores.filter(c => allowed.includes(
+                        String(c?.functionalDescription?.shape?.family ?? '').toLowerCase()
+                    ))
+                    : cores;
+                this.allCoresFromShapesProcessed(true, filtered);
+                return filtered;
             }
         },
 
@@ -204,12 +297,14 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             await mkf.ready;
 
             let coreShapeFamilies = [];
+            const allowed = getRestrictedShapeFamilies();
 
             const coreShapeFamiliesArr = toArray(await mkf.get_available_core_shape_families());
             for (const shapeFamily of coreShapeFamiliesArr) {
                 if (!shapeFamily.includes("pqi") && !shapeFamily.includes("ut") &&
                     !shapeFamily.includes("ui") && !shapeFamily.includes("h") && !shapeFamily.includes("drum")) {
-                    if (wiringTechnology == null || wiringTechnology == 'Wound' || shapeFamily != 'T') {
+                    if (wiringTechnology == null || wiringTechnology?.toLowerCase() === 'wound' || shapeFamily.toLowerCase() !== 't') {
+                        if (allowed != null && !allowed.includes(shapeFamily.toLowerCase())) continue;
                         coreShapeFamilies.push(shapeFamily);
                     }
                 }
@@ -278,6 +373,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
 
             let coreShapeFamilies = [];
             const coreShapeNames = {};
+            const allowed = getRestrictedShapeFamilies();
 
             const coreShapeFamiliesArr = toArray(await mkf.get_available_core_shape_families());
             for (const shapeFamily of coreShapeFamiliesArr) {
@@ -285,9 +381,10 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                     !shapeFamily.includes("ui") && !shapeFamily.includes("h") && !shapeFamily.includes("drum")) {
                     // Exclude toroidal cores (T family) when in Planar/Printed mode
                     const isToroidal = shapeFamily.toLowerCase() === 't';
-                    const isPlanarMode = mas.inputs.designRequirements.wiringTechnology != null && 
-                                         mas.inputs.designRequirements.wiringTechnology !== 'Wound';
+                    const isPlanarMode = mas.inputs.designRequirements.wiringTechnology != null &&
+                                         mas.inputs.designRequirements.wiringTechnology?.toLowerCase() !== 'wound';
                     if (!(isToroidal && isPlanarMode)) {
+                        if (allowed != null && !allowed.includes(shapeFamily.toLowerCase())) continue;
                         coreShapeFamilies.push(shapeFamily);
                     }
                 }
@@ -324,7 +421,12 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                     if (!shapeFamily.includes("pqi") && !shapeFamily.includes("ut") &&
                         !shapeFamily.includes("ui") && !shapeFamily.includes("h") && !shapeFamily.includes("drum")) {
                         coreShapeNames[shapeFamily] = [];
-                        const coreShapeNamesArr = toArray(await mkf.get_available_core_shapes_by_family(shapeFamily.toLowerCase()));
+                        // Pass the family name exactly as get_available_core_shape_families
+                        // returned it. The CoreShapeFamily enum is case-sensitive
+                        // ("planarE"/"planarEL"/"planarER"); lowercasing breaks the
+                        // WASM from_json parse, leaving an uninitialized family that
+                        // returns another family's shapes.
+                        const coreShapeNamesArr = toArray(await mkf.get_available_core_shapes_by_family(shapeFamily));
 
                         let numberShapes = 0;
                         for (const aux of coreShapeNamesArr) {
@@ -476,7 +578,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         },
 
         async getCoreTemperatureDependantParameters(core, ambientTemperature) {
-            if (core['functionalDescription']['shape'] != "" && core['functionalDescription']['material'] != "") {
+            if (core?.functionalDescription?.shape && core?.functionalDescription?.material) {
                 const mkf = await waitForMkf();
                 await mkf.ready;
 
@@ -519,7 +621,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             await mkf.ready;
 
             let bobbinResult = "";
-            if (wiringTechnology == "Printed") {
+            if (wiringTechnology?.toLowerCase() === "printed") {
                 bobbinResult = await mkf.create_simple_bobbin_from_core_with_custom_thickness(JSON.stringify(core), 0);
             }
             else {
@@ -560,15 +662,16 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         coreAdvised(success = true, dataOrMessage = '') {
         },
 
-        async adviseCore(inputs, hasCurrentApplicationMirroredWindings, coreAdviserWeights, adviserSettings) {
-            console.log('[DEBUG adviseCore] Starting...');
+        async adviseCore(inputs, coreAdviserWeights, adviserSettings) {
             const mkf = await waitForMkf();
             await mkf.ready;
-            console.log('[DEBUG adviseCore] MKF ready');
 
             const settings = JSON.parse(await mkf.get_settings());
 
-            if (hasCurrentApplicationMirroredWindings) {
+            // CMC topology → force toroidal, no distributed gaps (winding goes around).
+            const isCmc = inputs?.designRequirements?.topology?.toLowerCase() === 'commonmodechoke';
+
+            if (isCmc) {
                 settings["coreIncludeDistributedGaps"] = false;
                 settings["coreIncludeMargin"] = true;
                 settings["coreIncludeStacks"] = true;
@@ -583,6 +686,8 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 settings["useToroidalCores"] = adviserSettings.allowToroidalCores;
                 settings["useOnlyCoresInStock"] = false;
             }
+            settings["coreAdviserEnableTemperatureFilter"] = adviserSettings.enableTemperatureFilter ?? false;
+            settings["coreAdviserMaximumTemperature"] = adviserSettings.maximumTemperature ?? 130;
             await mkf.set_settings(JSON.stringify(settings));
 
             // Ensure coreAdviseMode is a string, not an object
@@ -592,11 +697,6 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 coreAdviseMode = "standard cores";
             }
             
-            console.log('[DEBUG adviseCore] Calling calculate_advised_cores...');
-            console.log('[DEBUG adviseCore] Inputs:', JSON.stringify(inputs).substring(0, 200));
-            console.log('[DEBUG adviseCore] Weights:', JSON.stringify(coreAdviserWeights));
-            console.log('[DEBUG adviseCore] Mode:', coreAdviseMode);
-
             // Validate and fix frequency before calling WASM
             // Frequency must be a reasonable value (1 Hz to 100 MHz range)
             // Values outside this range are likely uninitialized/garbage
@@ -609,7 +709,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                         op.excitationsPerWinding.forEach((exc, excIndex) => {
                             const freq = exc.frequency;
                             if (!freq || !Number.isFinite(freq) || freq < MIN_VALID_FREQUENCY || freq > MAX_VALID_FREQUENCY) {
-                                console.warn(`[DEBUG adviseCore] Invalid frequency=${freq} in operating point ${opIndex}, excitation ${excIndex}. Set to ${DEFAULT_FREQUENCY}`);
+                                console.warn(`[taskQueue] Invalid frequency=${freq} in operating point ${opIndex}, excitation ${excIndex}. Set to ${DEFAULT_FREQUENCY}`);
                                 exc.frequency = DEFAULT_FREQUENCY;
                             }
                         });
@@ -617,22 +717,49 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 });
             }
 
-            // Deep-clone inputs (strips Vue reactivity) and filter nulls from harmonics
+            // Deep-clone inputs (strips Vue reactivity) and sanitize excitation signals.
+            // WASM calculate_buck_inputs returns garbage for some operating points:
+            //   - all-zero frequency harmonics → strip zero-freq entries, remove key if empty
+            //   - waveform.time arrays with trailing nulls → truncate at first null
+            //   - waveform.data arrays mismatched with time → truncate to match
             const inputsClean = JSON.parse(JSON.stringify(inputs));
             if (inputsClean.operatingPoints) {
                 for (const op of inputsClean.operatingPoints) {
                     if (op.excitationsPerWinding == null) continue;
                     for (const exc of op.excitationsPerWinding) {
                         for (const signal of ['current', 'voltage']) {
-                            const harmonics = exc[signal]?.harmonics;
-                            if (harmonics == null) continue;
-                            if (harmonics.amplitudes != null) harmonics.amplitudes = harmonics.amplitudes.filter(v => v !== null);
-                            if (harmonics.frequencies != null) harmonics.frequencies = harmonics.frequencies.filter(v => v !== null);
+                            if (!exc[signal]) continue;
+
+                            // Sanitize harmonics
+                            const harmonics = exc[signal].harmonics;
+                            if (harmonics != null) {
+                                if (harmonics.amplitudes != null) harmonics.amplitudes = harmonics.amplitudes.filter(v => v !== null);
+                                if (harmonics.frequencies != null) harmonics.frequencies = harmonics.frequencies.filter(v => v !== null);
+                                const keep = (harmonics.frequencies || []).map(f => f !== 0);
+                                if (harmonics.amplitudes) harmonics.amplitudes = harmonics.amplitudes.filter((_, i) => keep[i]);
+                                if (harmonics.frequencies) harmonics.frequencies = harmonics.frequencies.filter((_, i) => keep[i]);
+                                if (!harmonics.amplitudes?.length && !harmonics.frequencies?.length) {
+                                    delete exc[signal].harmonics;
+                                }
+                            }
+
+                            // Sanitize waveform — truncate arrays at first null in time
+                            const waveform = exc[signal].waveform;
+                            if (waveform?.time) {
+                                const firstNull = waveform.time.indexOf(null);
+                                if (firstNull === 0) {
+                                    delete exc[signal].waveform;
+                                } else if (firstNull > 0) {
+                                    waveform.time = waveform.time.slice(0, firstNull);
+                                    if (waveform.data) waveform.data = waveform.data.slice(0, firstNull);
+                                }
+                            }
                         }
                     }
                 }
             }
 
+            masSentry('adviseCore', inputsClean, 'Inputs');
             const result = await mkf.calculate_advised_cores(JSON.stringify(inputsClean), JSON.stringify(coreAdviserWeights), 1, coreAdviseMode);
 
             if (result.startsWith("Exception")) {
@@ -643,6 +770,8 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const aux = JSON.parse(result);
             const log = aux["log"];
             const data = aux["data"];
+            // Diagnostic: expose raw result on window so capture specs can read the full payload
+            try { if (typeof window !== 'undefined') window.__lastAdviseCoreRaw = aux; } catch (_) {}
 
             if (data.length > 0) {
                 const magnetic = data[0].mas.magnetic;
@@ -650,7 +779,12 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 return magnetic;
             }
             else {
-                throw new Error("No suitable core found for the given requirements");
+                // Surface the MKF Core Adviser log so we can see WHY every
+                // candidate was rejected (gap too large, temperature, losses, etc).
+                const logSummary = Array.isArray(log)
+                    ? log.slice(-20).join('\n')
+                    : (typeof log === 'string' ? log : JSON.stringify(log));
+                throw new Error(`No suitable core found for the given requirements\n--- MKF Core Adviser log ---\n${logSummary}`);
             }
         },
 
@@ -882,7 +1016,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
 
             data.turnsRatio = coil.functionalDescription[0].numberTurns / coil.functionalDescription[windingIndex].numberTurns;
             data.dcResistancePerMeter = await mkf.calculate_dc_resistance_per_meter(wireString, operatingPoints?.conditions?.ambientTemperature || 25);
-            
+
             if (hasCurrentData) {
                 data.skinAcResistancePerMeter = await mkf.calculate_skin_ac_resistance_per_meter(wireString, currentString, operatingPoints.conditions.ambientTemperature);
                 data.skinAcFactor = await mkf.calculate_skin_ac_factor(wireString, currentString, operatingPoints.conditions.ambientTemperature);
@@ -1198,6 +1332,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const mkf = await waitForMkf();
             await mkf.ready;
 
+            masSentry('adviseAllWires', mas, 'Mas');
             const resultMasWithCoil = await mkf.calculate_advised_coil(JSON.stringify(mas));
 
             if (resultMasWithCoil.startsWith("Exception")) {
@@ -1206,8 +1341,6 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
             else {
                 const masWithCoil = JSON.parse(resultMasWithCoil);
-                console.warn("masWithCoil")
-                console.warn(deepCopy(masWithCoil))
                 setTimeout(() => {this.allWiresAdvised(true, masWithCoil.magnetic.coil);}, this.task_standard_response_delay);
                 return masWithCoil.magnetic.coil;
             }
@@ -1246,6 +1379,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const mkf = await waitForMkf();
             await mkf.ready;
 
+            masSentry('adviseWire', mas, 'Mas');
             const resultMasWithCoil = await mkf.calculate_advised_coil(JSON.stringify(mas));
 
             if (resultMasWithCoil.startsWith("Exception")) {
@@ -1254,8 +1388,6 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
             else {
                 const masWithCoil = JSON.parse(resultMasWithCoil);
-                console.warn("masWithCoil")
-                console.warn(deepCopy(masWithCoil))
                 setTimeout(() => {this.allWiresAdvised(true, masWithCoil.magnetic.coil.functionalDescription[windingIndex]);}, this.task_standard_response_delay);
                 return {
                     winding: masWithCoil.magnetic.coil.functionalDescription[windingIndex],
@@ -1270,6 +1402,10 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         async simulate(mas, modelsData) {
             const mkf = await waitForMkf();
             await mkf.ready;
+
+            // MAS sentry — validate before WASM round-trip. Catches schema
+            // drift at the boundary with the exact bad field, not deep in C++.
+            masSentry('simulate', mas, 'Mas');
 
             const inputsString = JSON.stringify(mas.inputs);
             const magneticsString = JSON.stringify(mas.magnetic);
@@ -1442,6 +1578,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const mkf = await waitForMkf();
             await mkf.ready;
 
+            masSentry('calculateFillingFactors', coil, 'Coil');
             const result = await mkf.calculate_filling_factor(JSON.stringify(coil));
 
             if (result.startsWith("Exception")) {

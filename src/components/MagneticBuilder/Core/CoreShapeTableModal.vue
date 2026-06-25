@@ -1,5 +1,5 @@
-<script setup >
-import { Modal } from "bootstrap";
+<script setup>
+import Dialog from 'primevue/dialog'
 import DataTable from 'datatables.net-vue3';
 import DataTablesCore from 'datatables.net';
 </script>
@@ -7,7 +7,8 @@ import DataTablesCore from 'datatables.net';
 <script>
 
 export default {
-    emits: ['coreShapeSelected'],
+    components: { Dialog },
+    emits: ['coreShapeSelected', 'update:visible'],
     props: {
         dataTestLabel: {
             type: String,
@@ -21,6 +22,7 @@ export default {
             type: Array,
             required: true,
         },
+        visible: { type: Boolean, default: false },
     },
     data() {
         DataTable.use(DataTablesCore);
@@ -40,14 +42,16 @@ export default {
     watch: {
         'shapeFamily': {
             handler(newValue, oldValue) {
-                this.$refs.coreShapeTable.dt.search(newValue).draw().columns.adjust();
+                if (this.$refs.coreShapeTable && this.$refs.coreShapeTable.dt) {
+                    this.$refs.coreShapeTable.dt.search(newValue).draw().columns.adjust();
+                }
             },
           deep: true
         },
     },
     methods: {
         selectCoreShape(data) {
-            this.$refs.closeSettingsModalRef.click();
+            this.$emit('update:visible', false);
             this.$emit('coreShapeSelected', data)
         }
     }
@@ -56,17 +60,20 @@ export default {
 
 
 <template>
-    <div class="modal fade" :id="'coreShapeTableModal'" tabindex="-1" :aria-labelledby="'coreShapeTableModal-settingsModalLabel'" aria-hidden="true">
-        <div class="modal-dialog modal-xl modal-dialog-scrollable shape-table-modal">
-            <div class="modal-content shape-modal-content">
-                <div class="modal-header shape-modal-header">
-                    <div class="d-flex align-items-center">
-                        <i class="fa-solid fa-cubes shape-header-icon me-3"></i>
-                        <h5 :data-cy="dataTestLabel + '-settingsModal-notification-text'" class="modal-title mb-0 shape-modal-title" :id="'coreShapeTableModal-settingsModalLabel'">Select Core Shape</h5>
-                    </div>
-                    <button ref="closeSettingsModalRef" type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="settingsModalClose"></button>
-                </div>
-                <div class="modal-body px-4 py-4" id="dataTables_wrapper">
+    <Dialog
+        :visible="visible"
+        @update:visible="(v) => $emit('update:visible', v)"
+        :modal="true"
+        :draggable="false"
+        :style="{ width: 'min(95vw, 1200px)' }"
+        :pt="{ root: { class: 'shape-modal-content' } }">
+        <template #header>
+            <div class="d-flex align-items-center">
+                <i class="pi pi-box shape-header-icon mr-3"></i>
+                <h5 :data-cy="dataTestLabel + '-settingsModal-notification-text'" class="modal-title mb-0 shape-modal-title">Select Core Shape</h5>
+            </div>
+        </template>
+        <div class="px-2 py-2" id="dataTables_wrapper">
                     <DataTable
                         :class="''"
                         :columns="coreShapeColumns"
@@ -90,13 +97,11 @@ export default {
                             <button
                                 class="btn shape-select-btn"
                                 @click="selectCoreShape(props.rowData)"
-                            ><i class="fa-solid fa-arrow-right"></i></button>
+                            ><i class="pi pi-arrow-right"></i></button>
                         </template>
                     </DataTable>
                 </div>
-            </div>
-        </div>
-    </div>
+    </Dialog>
 </template>
 
 <style>
@@ -105,33 +110,33 @@ export default {
     }
 
     .shape-modal-content {
-        background-color: #1e2128;
-        border: 1px solid #6c757d;
+        background-color: var(--p-dark);
+        border: 1px solid var(--p-secondary);
         border-radius: 0.75rem;
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 25px 50px -12px rgba(var(--p-black-rgb), 0.5);
     }
 
     .shape-modal-header {
-        border-bottom: 1px solid #495057;
+        border-bottom: 1px solid var(--p-gray-700);
         padding: 1rem 1.5rem;
     }
 
     .shape-modal-title {
-        color: #f8f9fa;
+        color: var(--p-gray-100);
         font-weight: 600;
         letter-spacing: 0.01em;
     }
 
     .shape-header-icon {
-        color: var(--bs-primary);
+        color: var(--p-primary);
         font-size: 1.25rem;
     }
 
     .shape-select-btn {
-        background-color: #343a40;
-        color: #f8f9fa;
-        border: 1px solid #6c757d;
-        border-radius: var(--bs-border-radius);
+        background-color: var(--p-gray-700);
+        color: var(--p-gray-100);
+        border: 1px solid var(--p-secondary);
+        border-radius: var(--p-border-radius);
         padding: 0.3rem 0.75rem;
         font-size: 0.8rem;
         height: 1.75rem;
@@ -141,30 +146,30 @@ export default {
     }
 
     .shape-select-btn:hover {
-        background-color: var(--bs-primary);
-        border-color: var(--bs-primary);
-        color: #fff;
+        background-color: var(--p-primary);
+        border-color: var(--p-primary);
+        color: var(--p-white);
     }
 
     .shape-select-btn:focus {
-        box-shadow: 0 0 0 0.15rem rgba(var(--bs-primary-rgb), 0.25);
+        box-shadow: 0 0 0 0.15rem rgba(var(--p-primary-rgb), 0.25);
     }
 
     /* DataTable wrapper */
     #dataTables_wrapper {
-        color: #f8f9fa;
+        color: var(--p-gray-100);
     }
 
     #dataTables_wrapper table {
-        color: #f8f9fa;
+        color: var(--p-gray-100);
         border-collapse: separate;
         border-spacing: 0;
     }
 
     #dataTables_wrapper table thead th {
-        color: #dee2e6;
-        background-color: #2c2f36;
-        border-bottom: 2px solid var(--bs-primary);
+        color: var(--p-gray-300);
+        background-color: var(--p-gray-800);
+        border-bottom: 2px solid var(--p-primary);
         padding: 0.75rem 1rem;
         font-size: 0.8rem;
         font-weight: 600;
@@ -173,29 +178,29 @@ export default {
     }
 
     #dataTables_wrapper table tbody td {
-        color: #f8f9fa;
-        background-color: #1e2128;
-        border-bottom: 1px solid #343a40;
+        color: var(--p-gray-100);
+        background-color: var(--p-dark);
+        border-bottom: 1px solid var(--p-gray-700);
         padding: 0.6rem 1rem;
         font-size: 0.85rem;
         transition: background-color 0.15s;
     }
 
     #dataTables_wrapper table tbody tr:hover td {
-        background-color: #343a40;
+        background-color: var(--p-gray-700);
     }
 
     #dataTables_wrapper table tbody tr.selected td {
-        background-color: rgba(var(--bs-primary-rgb), 0.15);
+        background-color: rgba(var(--p-primary-rgb), 0.15);
     }
 
     /* Search input */
     #dataTables_wrapper .dataTables_filter input,
     #dataTables_wrapper .dt-search input {
-        background-color: #2c2f36 !important;
-        color: #f8f9fa !important;
-        border: 1px solid #6c757d !important;
-        border-radius: var(--bs-border-radius) !important;
+        background-color: var(--p-gray-800) !important;
+        color: var(--p-gray-100) !important;
+        border: 1px solid var(--p-secondary) !important;
+        border-radius: var(--p-border-radius) !important;
         padding: 0.35rem 0.75rem !important;
         font-size: 0.85rem !important;
         height: 1.75rem !important;
@@ -205,8 +210,8 @@ export default {
 
     #dataTables_wrapper .dataTables_filter input:focus,
     #dataTables_wrapper .dt-search input:focus {
-        border-color: var(--bs-primary) !important;
-        box-shadow: 0 0 0 0.15rem rgba(var(--bs-primary-rgb), 0.25) !important;
+        border-color: var(--p-primary) !important;
+        box-shadow: 0 0 0 0.15rem rgba(var(--p-primary-rgb), 0.25) !important;
     }
 
     /* Length select dropdown */
@@ -220,10 +225,10 @@ export default {
 
     #dataTables_wrapper .dataTables_length select,
     #dataTables_wrapper .dt-length select {
-        background-color: #2c2f36 !important;
-        color: #f8f9fa !important;
-        border: 1px solid #6c757d !important;
-        border-radius: var(--bs-border-radius) !important;
+        background-color: var(--p-gray-800) !important;
+        color: var(--p-gray-100) !important;
+        border: 1px solid var(--p-secondary) !important;
+        border-radius: var(--p-border-radius) !important;
         padding: 0.25rem 0.5rem !important;
         font-size: 0.85rem !important;
         height: 1.75rem !important;
@@ -234,14 +239,14 @@ export default {
 
     #dataTables_wrapper .dataTables_length select:focus,
     #dataTables_wrapper .dt-length select:focus {
-        border-color: var(--bs-primary) !important;
-        box-shadow: 0 0 0 0.15rem rgba(var(--bs-primary-rgb), 0.25) !important;
+        border-color: var(--p-primary) !important;
+        box-shadow: 0 0 0 0.15rem rgba(var(--p-primary-rgb), 0.25) !important;
     }
 
     #dataTables_wrapper .dataTables_length select option,
     #dataTables_wrapper .dt-length select option {
-        background-color: #2c2f36;
-        color: #f8f9fa;
+        background-color: var(--p-gray-800);
+        color: var(--p-gray-100);
     }
 
     /* Top controls - entries + search on same line */
@@ -270,7 +275,7 @@ export default {
     #dataTables_wrapper .dt-info,
     #dataTables_wrapper .dt-length label,
     #dataTables_wrapper .dt-search label {
-        color: #adb5bd !important;
+        color: var(--p-gray-500) !important;
         font-size: 0.8rem;
         white-space: nowrap;
     }
@@ -278,10 +283,10 @@ export default {
     /* Pagination */
     #dataTables_wrapper .dataTables_paginate .paginate_button,
     #dataTables_wrapper .dt-paging button {
-        background-color: #2c2f36 !important;
-        color: #dee2e6 !important;
-        border: 1px solid #6c757d !important;
-        border-radius: var(--bs-border-radius) !important;
+        background-color: var(--p-gray-800) !important;
+        color: var(--p-gray-300) !important;
+        border: 1px solid var(--p-secondary) !important;
+        border-radius: var(--p-border-radius) !important;
         margin: 0 2px !important;
         padding: 0.3rem 0.65rem !important;
         font-size: 0.8rem !important;
@@ -291,24 +296,24 @@ export default {
 
     #dataTables_wrapper .dataTables_paginate .paginate_button.current,
     #dataTables_wrapper .dt-paging button.current {
-        background-color: var(--bs-primary) !important;
-        border-color: var(--bs-primary) !important;
-        color: #fff !important;
+        background-color: var(--p-primary) !important;
+        border-color: var(--p-primary) !important;
+        color: var(--p-white) !important;
         font-weight: 600 !important;
     }
 
     #dataTables_wrapper .dataTables_paginate .paginate_button:hover,
     #dataTables_wrapper .dt-paging button:hover {
-        background-color: #343a40 !important;
-        border-color: var(--bs-primary) !important;
-        color: #f8f9fa !important;
+        background-color: var(--p-gray-700) !important;
+        border-color: var(--p-primary) !important;
+        color: var(--p-gray-100) !important;
     }
 
     #dataTables_wrapper .dataTables_paginate .paginate_button.disabled,
     #dataTables_wrapper .dt-paging button.disabled {
-        color: #6c757d !important;
-        background-color: #1e2128 !important;
-        border-color: #343a40 !important;
+        color: var(--p-secondary) !important;
+        background-color: var(--p-dark) !important;
+        border-color: var(--p-gray-700) !important;
         cursor: default !important;
         opacity: 0.5;
     }

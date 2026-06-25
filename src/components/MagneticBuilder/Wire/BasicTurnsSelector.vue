@@ -181,7 +181,7 @@ export default {
 <template>
     <div class="turns-wrapper">
         <img :data-cy="dataTestLabel + '-BasicWireSelector-loading'" v-if="loading" class="mx-auto d-block col-12" alt="loading" style="width: 60%; height: auto;" :src="$settingsStore.loadingGif">
-        <Dimension class="text-start"
+        <Dimension class="text-left"
             v-tooltip="tooltipsMagneticBuilder.wireNumberTurns"
             v-if="!loading"
             :disabled="readOnly"
@@ -195,7 +195,8 @@ export default {
             :allowNegative="false"
             :modelValue="localData"
             :forceUpdate="forceUpdate"
-            :styleClassInput="'offset-3 col-6'"
+            :labelWidthProportionClass="'col-12 md:col-5'"
+            :valueWidthProportionClass="'col-12 md:col-7'"
             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
@@ -203,7 +204,7 @@ export default {
             :textColor="$styleStore.magneticBuilder.inputTextColor"
             @update="turnsUpdated"
         />
-        <Dimension class="text-start"
+        <Dimension class="text-left"
             v-tooltip="tooltipsMagneticBuilder.wireNumberParallels"
             v-if="!loading"
             :disabled="readOnly"
@@ -217,7 +218,8 @@ export default {
             :allowNegative="false"
             :modelValue="localData"
             :forceUpdate="forceUpdate"
-            :styleClassInput="'offset-3 col-6'"
+            :labelWidthProportionClass="'col-12 md:col-5'"
+            :valueWidthProportionClass="'col-12 md:col-7'"
             :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
             :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
             :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
