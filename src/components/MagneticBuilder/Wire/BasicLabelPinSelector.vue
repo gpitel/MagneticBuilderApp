@@ -57,6 +57,18 @@ export default {
             const winding = this.winding;
             return (winding && Array.isArray(winding.connections)) ? winding.connections : [];
         },
+        // Read-only display of the winding's isolation side (functionalDescription
+        // .isolationSide in MAS — "primary", "secondary", ...). Capitalised for
+        // display; the stored value is untouched. Recomputes with windingIndex, so
+        // it follows the user as they click between windings.
+        isolationSideLabel() {
+            const winding = this.winding;
+            const side = winding ? winding.isolationSide : null;
+            if (side == null || side === '') {
+                return '';
+            }
+            return String(side).charAt(0).toUpperCase() + String(side).slice(1);
+        },
         numberParallels() {
             const winding = this.winding;
             const n = winding ? Number(winding.numberParallels) : 1;
@@ -389,6 +401,17 @@ export default {
             >
         </div>
 
+        <div class="labelpin-name-row">
+            <label class="labelpin-name-label">Isolation side</label>
+            <span
+                class="labelpin-field labelpin-readonly-value"
+                :style="fieldStyle"
+                :class="fieldClass"
+                :data-cy="dataTestLabel + '-IsolationSide'"
+                v-tooltip="'Electrical isolation group this winding belongs to (functionalDescription.isolationSide in MAS). Set by the design topology — read-only here.'"
+            >{{ isolationSideLabel || '—' }}</span>
+        </div>
+
         <div class="labelpin-pins">
             <div class="labelpin-pins-header">
                 <span>Pins / Connections <span class="labelpin-count">{{ connections.length }} / {{ maxConnections }}</span></span>
@@ -525,6 +548,15 @@ export default {
 
 .labelpin-name-input {
     flex: 1 1 auto;
+}
+
+/* Read-only field (e.g. isolation side): looks like the themed inputs but is a
+   non-editable <span>, so render it dimmed like a disabled control. */
+.labelpin-readonly-value {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    opacity: 0.7;
 }
 
 .labelpin-pins {
