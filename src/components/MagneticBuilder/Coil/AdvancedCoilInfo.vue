@@ -157,8 +157,10 @@ export default {
             
             const tripoleData = this.fullCapacitanceData.tripoleCapacitancePerWinding[primary]?.[secondary];
             if (!tripoleData) return null;
-            
-            console.log('[AdvancedCoilInfo] Using MKF 3-capacitor model for', primary, '-', secondary, tripoleData);
+            // NOTE: no console.log here — this is a computed and must stay pure.
+            // The global console interceptor pushes into a reactive store that the
+            // ConsolePanel renders, so logging from a computed mutates a reactive
+            // dep during render → "Maximum recursive updates exceeded".
             const C1 = tripoleData.C1 || tripoleData.c1 || 0;
             const C2 = tripoleData.C2 || tripoleData.c2 || 0;
             const C3 = tripoleData.C3 || tripoleData.c3 || 0;
@@ -183,8 +185,7 @@ export default {
             
             const sixCapData = this.fullCapacitanceData.sixCapacitorNetworkPerWinding[primary]?.[secondary];
             if (!sixCapData) return null;
-            
-            console.log('[AdvancedCoilInfo] Using MKF 6-capacitor model for', primary, '-', secondary, sixCapData);
+            // No console.log — computed must stay pure (see threeCapacitorModel).
             const C1 = sixCapData.C1 || sixCapData.c1 || 0;
             const C2 = sixCapData.C2 || sixCapData.c2 || 0;
             const C3 = sixCapData.C3 || sixCapData.c3 || 0;
@@ -1392,7 +1393,9 @@ export default {
 
 <style scoped>
 .advancedcoil-wrapper {
-    padding: 0.5rem 0;
+    /* No top padding: align the parasitics cards with the normal MB config cards
+       (same vertical start). The grid gap handles inter-card spacing. */
+    padding: 0;
 }
 
 .advancedcoil-grid {

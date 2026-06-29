@@ -1407,9 +1407,29 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             // drift at the boundary with the exact bad field, not deep in C++.
             masSentry('simulate', mas, 'Mas');
 
-            const inputsString = JSON.stringify(mas.inputs);
-            const magneticsString = JSON.stringify(mas.magnetic);
-            const modelsString = JSON.stringify(modelsData);
+            // Send the WASM the same null-stripped payload the sentry validates.
+            // MKF's autocomplete emits explicit `null` for absent optionals, but
+            // the C++ deserializer rejects them ("type must be string, but is
+            // null"). The sentry already proved the stripped form is schema-valid.
+            const stripNullsForWasm = (v) => {
+                if (Array.isArray(v)) { v.forEach(stripNullsForWasm); return v; }
+                if (v && typeof v === 'object') {
+                    for (const k of Object.keys(v)) {
+                        if (v[k] === null || v[k] === 'null' || v[k] === undefined) delete v[k];
+                        else stripNullsForWasm(v[k]);
+                    }
+                }
+                return v;
+            };
+            const cleanMas = stripNullsForWasm(JSON.parse(JSON.stringify(mas)));
+            // modelsData often carries null model selectors (e.g. an unset
+            // windingSkinEffectLosses); the WASM reads each as a string and
+            // rejects null. Strip them so absent models fall back to defaults.
+            const cleanModels = stripNullsForWasm(JSON.parse(JSON.stringify(modelsData)));
+
+            const inputsString = JSON.stringify(cleanMas.inputs);
+            const magneticsString = JSON.stringify(cleanMas.magnetic);
+            const modelsString = JSON.stringify(cleanModels);
 
             const result = await mkf.simulate(inputsString, magneticsString, modelsString);
 

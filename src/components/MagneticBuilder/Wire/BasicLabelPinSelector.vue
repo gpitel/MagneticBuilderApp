@@ -541,7 +541,7 @@ export default {
 .labelpin-name-label {
     font-size: 0.78rem;
     font-weight: 600;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     white-space: nowrap;
     margin: 0;
 }
@@ -560,7 +560,7 @@ export default {
 }
 
 .labelpin-pins {
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.18);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.18);
     border-radius: 8px;
     padding: 0.45rem 0.55rem 0.55rem;
     background: rgba(0, 0, 0, 0.18);
@@ -573,7 +573,7 @@ export default {
     font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: var(--bs-primary);
+    color: var(--p-primary);
     margin-bottom: 0.45rem;
 }
 
@@ -592,9 +592,9 @@ export default {
     font-size: 0.72rem;
     font-weight: 600;
     cursor: pointer;
-    border: 1px solid rgba(var(--bs-primary-rgb), 0.55);
-    background: rgba(var(--bs-primary-rgb), 0.18);
-    color: var(--bs-primary);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.55);
+    background: rgba(var(--p-primary-rgb), 0.18);
+    color: var(--p-primary);
     transition: filter 0.15s, background 0.15s, opacity 0.15s;
 }
 
@@ -660,9 +660,9 @@ select.labelpin-field {
     font-size: 1.05rem;
     line-height: 1;
     cursor: pointer;
-    border: 1px solid rgba(var(--bs-danger-rgb), 0.5);
-    background: rgba(var(--bs-danger-rgb), 0.15);
-    color: var(--bs-danger);
+    border: 1px solid rgba(var(--p-danger-rgb), 0.5);
+    background: rgba(var(--p-danger-rgb), 0.15);
+    color: var(--p-danger);
     transition: filter 0.15s, opacity 0.15s;
 }
 

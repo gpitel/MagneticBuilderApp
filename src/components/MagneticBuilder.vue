@@ -227,7 +227,7 @@ export default {
             />
         </div>
         <div
-            class="row"
+            class="row gx-0"
             v-else-if="$stateStore.magneticBuilder.mode.coil == $stateStore.MagneticBuilderModes.Advanced"
         >
             <AdvancedCoilInfo

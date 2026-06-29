@@ -289,7 +289,14 @@ export default {
         },
         async assignWire() {
             this.errorMessage = "";
-            return await this.taskQueueStore.createNewWire(this.localData, this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex].wire);
+            // Commit straight to the captured windingIndex: a winding switch raises
+            // windingIndexChangeBlock and unmounts us, which would drop the deferred commit.
+            const windingIndex = this.windingIndex;
+            const wire = await this.taskQueueStore.createNewWire(this.localData, this.masStore.mas.magnetic.coil.functionalDescription[windingIndex].wire);
+            if (wire != null && typeof wire === 'object') {
+                this.masStore.mas.magnetic.coil.functionalDescription[windingIndex].wire = wire;
+            }
+            return wire;
         },
         getWireTypes() {
             this.taskQueueStore.getAvailableWires().then((wireTypes) => {
