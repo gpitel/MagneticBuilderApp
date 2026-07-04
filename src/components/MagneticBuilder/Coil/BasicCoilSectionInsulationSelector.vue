@@ -424,4 +424,24 @@ export default {
     min-width: 0;
 }
 
+/* The section/shield pills row lines up with the other labelled rows: its label
+   sits in the same fixed left column with the same type treatment, and the
+   pills start where the value inputs do */
+.insulation-body :deep(.section-selector-row) {
+    justify-content: flex-start;
+}
+.insulation-body :deep(.section-selector-label) {
+    flex: 0 0 10rem;
+    width: 10rem;
+    max-width: 10rem;
+    padding-left: 0.35rem;
+    font-size: 1rem;
+    font-weight: 400;
+    opacity: 1;
+}
+.insulation-body :deep(.section-pills) {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
 </style>
