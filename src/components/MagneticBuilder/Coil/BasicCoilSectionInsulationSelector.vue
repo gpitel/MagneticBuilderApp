@@ -39,6 +39,11 @@ export default {
         const selectedSectionIndex = 0;
         const topOrLeftMarginErrorMessage = "";
         const bottomOrRightMarginErrorMessage = "";
+        // Local buffer the margin inputs write into when a shield pill is selected
+        const shieldMarginLocal = {
+            topOrLeftMargin: 0,
+            bottomOrRightMargin: 0,
+        };
 
         return {
             taskQueueStore,
@@ -47,9 +52,25 @@ export default {
             selectedSectionIndex,
             topOrLeftMarginErrorMessage,
             bottomOrRightMarginErrorMessage,
+            shieldMarginLocal,
         }
     },
     computed: {
+        conductiveSectionsCount() {
+            const sections = this.masStore.mas.magnetic.coil.sectionsDescription || [];
+            return sections.filter((section) => section.type == 'conduction').length;
+        },
+        shieldRequirements() {
+            return this.masStore.mas.inputs?.designRequirements?.shielding || [];
+        },
+        // The shield requirement backing the selected pill, or null when a conduction
+        // section is selected (shield pills come after the conduction sections)
+        selectedShield() {
+            if (this.selectedSectionIndex < this.conductiveSectionsCount) {
+                return null;
+            }
+            return this.shieldRequirements[this.selectedSectionIndex - this.conductiveSectionsCount] || null;
+        },
         selectedSectionMargins() {
             const s = this.data && this.data.dataPerSection
                 ? this.data.dataPerSection[this.selectedSectionIndex]
@@ -105,8 +126,21 @@ export default {
                 this.$emit('marginUpdated');
             }
         },
+        applyShieldMargin() {
+            const requirement = this.selectedShield;
+            if (requirement == null) {
+                return;
+            }
+            requirement.margin = [this.shieldMarginLocal.topOrLeftMargin, this.shieldMarginLocal.bottomOrRightMargin];
+            this.$emit('marginUpdated');
+        },
         topOrInnerMarginUpdated(sectionIndex) {
             if (!this.blockingRebounds) {
+                if (this.selectedShield != null) {
+                    this.applyShieldMargin();
+                    this.topOrLeftMarginErrorMessage = "";
+                    return;
+                }
                 const isMarginHorizontal = this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == "contiguous";
 
                 this.taskQueueStore.checkIfFits(this.masStore.mas.magnetic.coil.bobbin, this.data.dataPerSection[sectionIndex].topOrLeftMargin, isMarginHorizontal).then((fits) => {
@@ -125,6 +159,11 @@ export default {
         },
         bottomOrOuterMarginUpdated(sectionIndex) {
             if (!this.blockingRebounds) {
+                if (this.selectedShield != null) {
+                    this.applyShieldMargin();
+                    this.bottomOrRightMarginErrorMessage = "";
+                    return;
+                }
                 const isMarginHorizontal = this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == "contiguous";
                 this.taskQueueStore.checkIfFits(this.masStore.mas.magnetic.coil.bobbin, this.data.dataPerSection[sectionIndex].topOrLeftMargin, isMarginHorizontal).then((fits) => {
                     if (fits) {
@@ -142,6 +181,11 @@ export default {
         },
         sectionIndexChanged(sectionIndex) {
             this.selectedSectionIndex = sectionIndex;
+            if (this.selectedShield != null) {
+                const margin = this.selectedShield.margin || [0, 0];
+                this.shieldMarginLocal.topOrLeftMargin = margin[0] || 0;
+                this.shieldMarginLocal.bottomOrRightMargin = margin[1] || 0;
+            }
             this.forceUpdate += 1;
             this.blockingRebounds = true;
             setTimeout(() => this.blockingRebounds = false, 10);
@@ -154,7 +198,7 @@ export default {
     <div v-show="showInsulationOptions && masStore.mas.magnetic.coil.sectionsDescription != null" class="insulation-panel">
         <div class="insulation-header">
             <div class="insulation-header-left">
-                <i class="pi pi-shield"></i>
+                <i class="pi pi-bars"></i>
                 <span>Insulation Settings</span>
             </div>
             <button
@@ -220,6 +264,8 @@ export default {
             <SectionSelector
                 :sectionIndex="selectedSectionIndex"
                 :masStore="masStore"
+                :includeShields="true"
+                :label="'Margins for'"
                 @sectionIndexChanged="sectionIndexChanged"
             />
 
@@ -237,7 +283,7 @@ export default {
                 :max="1"
                 :allowNegative="false"
                 :allowZero="true"
-                :modelValue="data.dataPerSection[selectedSectionIndex]"
+                :modelValue="selectedShield != null ? shieldMarginLocal : data.dataPerSection[selectedSectionIndex]"
                 :forceUpdate="forceUpdate"
                 :labelWidthProportionClass="'col-12 md:col-7'"
                 :valueWidthProportionClass="'col-12 md:col-5'"
@@ -264,7 +310,7 @@ export default {
                 :max="1"
                 :allowNegative="false"
                 :allowZero="true"
-                :modelValue="data.dataPerSection[selectedSectionIndex]"
+                :modelValue="selectedShield != null ? shieldMarginLocal : data.dataPerSection[selectedSectionIndex]"
                 :forceUpdate="forceUpdate"
                 :labelWidthProportionClass="'col-12 md:col-7'"
                 :valueWidthProportionClass="'col-12 md:col-5'"
@@ -366,9 +412,16 @@ export default {
     flex: 0 0 10rem;
     width: 10rem;
     max-width: 10rem;
+    /* The shared Dimension component clips long labels with an ellipsis; in this
+       narrow panel let them wrap to a second line instead */
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    line-height: 1.2;
 }
 .insulation-body :deep(.dim-value-row) {
     flex: 1 1 0;
     min-width: 0;
 }
+
 </style>

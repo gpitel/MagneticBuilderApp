@@ -6,6 +6,7 @@ import ListOfCharacters from '/WebSharedComponents/DataInput/ListOfCharacters.vu
 import CoilInfo from './CoilInfo.vue'
 import BasicCoilFillingFactors from './BasicCoilFillingFactors.vue'
 import BasicCoilSectionInsulationSelector from './BasicCoilSectionInsulationSelector.vue'
+import BasicCoilShieldSelector from './BasicCoilShieldSelector.vue'
 import BasicCoilSectionAlignmentSelector from './BasicCoilSectionAlignmentSelector.vue'
 import Magnetic2DVisualizer from '/WebSharedComponents/Common/Magnetic2DVisualizer.vue'
 import { toTitleCase, checkAndFixMas, deepCopy, roundWithDecimals, cleanCoil, generateHash } from '/WebSharedComponents/assets/js/utils.js'
@@ -73,6 +74,7 @@ export default {
         const historyStore = useHistoryStore();
         const taskQueueStore = useTaskQueueStore();
         const showAlignmentOptions = false;
+        const showShieldOptions = false;
 
         const showInsulationOptions = false;
         const loading = false;
@@ -145,6 +147,7 @@ export default {
             localData,
             forceUpdate,
             showAlignmentOptions,
+            showShieldOptions,
             showInsulationOptions,
             loading,
             recentChange,
@@ -483,7 +486,12 @@ export default {
             }
             inputCoil["_interlayerInsulationThickness"] = this.localData.interlayerThickness;
             inputCoil["_intersectionInsulationThickness"] = this.localData.intersectionThickness;
-            
+
+            const shielding = this.masStore.mas.inputs?.designRequirements?.shielding;
+            if (shielding != null && shielding.length > 0) {
+                inputCoil["_shielding"] = shielding;
+            }
+
             // Include margins in hash computation to detect margin changes even when sectionsDescription doesn't exist yet
             const coilWithMargins = {
                 ...this.masStore.mas.magnetic.coil,
@@ -761,6 +769,9 @@ export default {
         swapShowInsulationOptions(showInsulationOptions) {
             this.showInsulationOptions = showInsulationOptions;
         },
+        swapShowShieldOptions(showShieldOptions) {
+            this.showShieldOptions = showShieldOptions;
+        },
         bobbinUpdated(thickness) {
             // Prevent regenerating bobbin with zero thickness values
             if (this.localData.bobbinWallThickness <= 0 || this.localData.bobbinColumnThickness <= 0) {
@@ -836,8 +847,17 @@ export default {
                         :class="['coil-config-header-btn', showInsulationOptions ? 'coil-config-header-btn-primary' : 'coil-config-header-btn-outline']"
                         @click="swapShowInsulationOptions(!showInsulationOptions)"
                     >
-                        <i class="pi pi-shield"></i>
+                        <i class="pi pi-bars"></i>
                         <span>Insulation</span>
+                    </button>
+                    <button
+                        type="button"
+                        :disabled="!enableSubmenu || loading"
+                        :class="['coil-config-header-btn', showShieldOptions ? 'coil-config-header-btn-primary' : 'coil-config-header-btn-outline']"
+                        @click="swapShowShieldOptions(!showShieldOptions)"
+                    >
+                        <i class="pi pi-shield"></i>
+                        <span>Shields</span>
                     </button>
                 </div>
             </div>
@@ -1004,6 +1024,14 @@ export default {
             @marginUpdated="marginUpdated"
             @closeInsulation="swapShowInsulationOptions(false)"
         />
+
+        <BasicCoilShieldSelector
+            :showShieldOptions="showShieldOptions"
+            :masStore="masStore"
+            :readOnly="readOnly"
+            @marginUpdated="marginUpdated"
+            @closeShields="swapShowShieldOptions(false)"
+        />
     </div>
 </template>
 
@@ -1022,6 +1050,8 @@ export default {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
     padding: 0.6rem 0.9rem;
     background: rgba(120, 120, 120, 0.1);
     border-bottom: 1px solid rgba(120, 120, 120, 0.15);
@@ -1045,7 +1075,10 @@ export default {
 .coil-config-header-right {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.35rem;
+    justify-content: flex-end;
+    min-width: 0;
 }
 
 .coil-config-header-btn {

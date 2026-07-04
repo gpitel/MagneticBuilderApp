@@ -18,6 +18,18 @@ export default {
             type: Object,
             required: true,
         },
+        // Also list shields (from designRequirements.shielding) after the conduction
+        // sections, so per-shield settings like margins can be edited too
+        includeShields: {
+            type: Boolean,
+            default: false,
+        },
+        // Optional label shown before the pills, describing what selecting one does
+        // (e.g. "Margins for" in the insulation panel)
+        label: {
+            type: String,
+            default: '',
+        },
     },
     data() {
 
@@ -37,41 +49,101 @@ export default {
             }
             return sections;
         },
+        shieldEntries() {
+            if (!this.includeShields) {
+                return [];
+            }
+            return this.masStore.mas.inputs?.designRequirements?.shielding || [];
+        },
         numberSections() {
             if (this.masStore.mas.magnetic.coil.sectionsDescription != null) {
-                return this.conductiveSections.length;
+                return this.conductiveSections.length + this.shieldEntries.length;
             }
             else {
                 return this.masStore.mas.magnetic.coil.functionalDescription.length;
             }
         },
-        shortenedNames() {
-            const shortenedNames = {}
+        // Positional labels matching the winding pills ("Winding 1"), with a pass number
+        // appended only when interleaving splits a winding into several sections
+        sectionLabels() {
+            const functionalDescription = this.masStore.mas.magnetic.coil.functionalDescription || [];
+            const conductionCountPerWinding = {};
+            this.conductiveSections.forEach((section) => {
+                const windingName = section.partialWindings[0].winding;
+                conductionCountPerWinding[windingName] = (conductionCountPerWinding[windingName] || 0) + 1;
+            });
 
-            let width = 0;
-            if (this.$refs.coilSelectorContainer != null) {
-                width = this.$refs.coilSelectorContainer.clientWidth / this.numberSections;
-            }
-
+            const passSoFarPerWinding = {};
+            const labels = {};
             this.conductiveSections.forEach((section, key) => {
-                let label = toTitleCase(section.name.toLowerCase());
-                label = label.replace("section", "stn");
-                if (width > 0) {
-                    let slice = section.name.length
-                    if (width < 200)
-                        slice = 4;
-                    if (width < 150)
-                        slice = 3;
-                    if (width < 100)
-                        slice = 2;
-                    label = label.split(' ')
-                        .map(item => item.length <= slice? item + ' ' : item.slice(0, slice) + '. ')
-                        .join('');
+                const windingName = section.partialWindings[0].winding;
+                passSoFarPerWinding[windingName] = (passSoFarPerWinding[windingName] || 0) + 1;
+                const windingIndex = functionalDescription.findIndex((winding) => winding.name == windingName);
+                let label = windingIndex >= 0 ? 'Winding ' + (windingIndex + 1) : windingName;
+                if (conductionCountPerWinding[windingName] > 1) {
+                    label += ' (' + passSoFarPerWinding[windingName] + ')';
                 }
-                shortenedNames[key] = label;
+                labels[key] = label;
             })
 
-            return shortenedNames
+            return labels
+        },
+        // Pills in physical stack order: winding sections with any shields interleaved at
+        // the interface they occupy. Each entry keeps the encoded index the parents expect:
+        // plain conduction index for sections, conduction count + shield index for shields
+        pillEntries() {
+            const sections = this.masStore.mas.magnetic.coil.sectionsDescription || [];
+            const entries = [];
+            const placedShields = new Set();
+            let conductionIndex = 0;
+            let insulationInterfaceIndex = 0;
+
+            const shieldsAtInterface = (interfaceIndex, leftWinding, rightWinding) => {
+                const matches = [];
+                this.shieldEntries.forEach((requirement, shieldIndex) => {
+                    if (placedShields.has(shieldIndex)) {
+                        return;
+                    }
+                    if (requirement.interfaces != null && requirement.interfaces.length > 0) {
+                        if (requirement.interfaces.includes(interfaceIndex)) {
+                            matches.push(shieldIndex);
+                        }
+                    }
+                    else if (requirement.betweenWindings.length == 2 &&
+                             ((requirement.betweenWindings[0] == leftWinding && requirement.betweenWindings[1] == rightWinding) ||
+                              (requirement.betweenWindings[0] == rightWinding && requirement.betweenWindings[1] == leftWinding))) {
+                        matches.push(shieldIndex);
+                    }
+                });
+                return matches;
+            };
+
+            for (let i = 0; i < sections.length; i++) {
+                if (sections[i].type == 'conduction') {
+                    entries.push({
+                        encoded: conductionIndex,
+                        label: this.sectionLabels[conductionIndex],
+                    });
+                    conductionIndex++;
+                }
+                else {
+                    const previousSection = sections[i - 1];
+                    const nextSection = i + 1 < sections.length ? sections[i + 1] : sections[0];
+                    if (previousSection && previousSection.type == 'conduction' && nextSection.type == 'conduction') {
+                        shieldsAtInterface(insulationInterfaceIndex,
+                                           previousSection.partialWindings[0].winding,
+                                           nextSection.partialWindings[0].winding).forEach((shieldIndex) => {
+                            placedShields.add(shieldIndex);
+                            entries.push({
+                                encoded: this.conductiveSections.length + shieldIndex,
+                                label: this.shieldEntries[shieldIndex].name || 'Shield ' + (shieldIndex + 1),
+                            });
+                        });
+                    }
+                    insulationInterfaceIndex++;
+                }
+            }
+            return entries;
         }
     }
 }
@@ -80,14 +152,15 @@ export default {
 <template>
     <div class="section-selector" ref="coilSelectorContainer">
         <div v-if="numberSections > 1" class="section-selector-row">
+            <span v-if="label" class="section-selector-label">{{label}}</span>
             <img :data-cy="dataTestLabel + '-BasicCoilBuilder-loading'" v-if="masStore.mas.magnetic.coil.sectionsDescription == null" class="mx-auto d-block" alt="loading" style="width: 60%; height: auto;" :src="$settingsStore.loadingGif">
             <div v-else class="section-pills">
                 <button
-                    v-for="key in range(0, numberSections)"
-                    :key="key"
-                    :class="['section-pill', { active: sectionIndex === key }]"
-                    @click="$emit('sectionIndexChanged', key)">
-                    {{ shortenedNames[key] }}
+                    v-for="entry in pillEntries"
+                    :key="entry.encoded"
+                    :class="['section-pill', { active: sectionIndex === entry.encoded }]"
+                    @click="$emit('sectionIndexChanged', entry.encoded)">
+                    {{ entry.label }}
                 </button>
             </div>
         </div>
@@ -103,7 +176,16 @@ export default {
 
 .section-selector-row {
     display: flex;
+    align-items: center;
     justify-content: center;
+    gap: 0.5rem;
+}
+
+.section-selector-label {
+    flex: 0 0 auto;
+    font-size: 0.9rem;
+    font-weight: 600;
+    opacity: 0.85;
 }
 
 .section-pills {
