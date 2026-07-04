@@ -41,11 +41,16 @@ export default {
             value,
             label: connectionTypeLabels[value] || value,
         }));
+        const shieldingTypeOptions = [
+            { value: 'foil', label: 'Copper foil' },
+            { value: 'wound', label: 'Wound screen' },
+        ];
 
         return {
             forceUpdate,
             blockingRebounds,
             connectionTypeOptions,
+            shieldingTypeOptions,
         }
     },
     computed: {
@@ -172,6 +177,22 @@ export default {
             }
             requirement.connection = connection;
         },
+        shieldTypeChanged(requirement, type) {
+            requirement.type = type;
+            if (type != 'wound') {
+                delete requirement.wire;
+            }
+            this.$emit('marginUpdated');
+        },
+        shieldWireChanged(requirement, value) {
+            if (value == '') {
+                delete requirement.wire;
+            }
+            else {
+                requirement.wire = value;
+            }
+            this.$emit('marginUpdated');
+        },
         shieldThicknessUpdated(value) {
             if (!this.blockingRebounds) {
                 this.$emit('marginUpdated');
@@ -248,6 +269,30 @@ export default {
                     @update:model-value="shieldInterfaceChanged(requirement, $event)"
                 />
                 <div class="shield-connection-row">
+                    <label class="shield-connection-label">Construction</label>
+                    <Select
+                        class="shield-connection-select"
+                        :data-cy="dataTestLabel + '-ShieldType-' + requirementIndex"
+                        :disabled="readOnly"
+                        :options="shieldingTypeOptions"
+                        optionLabel="label"
+                        optionValue="value"
+                        :model-value="requirement.type ?? 'foil'"
+                        @update:model-value="shieldTypeChanged(requirement, $event)"
+                    />
+                </div>
+                <div v-if="requirement.type == 'wound'" class="shield-connection-row">
+                    <label class="shield-connection-label">Screen wire</label>
+                    <InputText
+                        class="shield-wire-input"
+                        :data-cy="dataTestLabel + '-ShieldWire-' + requirementIndex"
+                        :disabled="readOnly"
+                        placeholder="e.g. Round 32.0 - Heavy Build"
+                        :model-value="requirement.wire ?? ''"
+                        @change="shieldWireChanged(requirement, $event.target.value)"
+                    />
+                </div>
+                <div class="shield-connection-row">
                     <label class="shield-connection-label">Termination</label>
                     <InputText
                         class="shield-connection-name"
@@ -271,6 +316,7 @@ export default {
                     />
                 </div>
                 <Dimension
+                    v-if="requirement.type != 'wound' || !requirement.wire"
                     :disabled="readOnly"
                     class="col-12 text-left"
                     :name="'thickness'"
@@ -455,6 +501,13 @@ export default {
 
 .shield-connection-name {
     flex: 1 1 35%;
+    min-width: 0;
+    font-size: 0.88rem;
+    padding: 0.3rem 0.4rem;
+}
+
+.shield-wire-input {
+    flex: 1 1 0;
     min-width: 0;
     font-size: 0.88rem;
     padding: 0.3rem 0.4rem;
