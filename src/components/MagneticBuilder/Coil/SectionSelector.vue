@@ -98,10 +98,6 @@ export default {
             let conductionIndex = 0;
             let insulationInterfaceIndex = 0;
 
-            const functionalDescriptionForShields = this.masStore.mas.magnetic.coil.functionalDescription || [];
-            const windingIndexOf = (section) =>
-                functionalDescriptionForShields.findIndex((winding) => winding.name == section.partialWindings[0].winding);
-
             const shieldsAtInterface = (interfaceIndex, leftWinding, rightWinding) => {
                 const matches = [];
                 this.shieldEntries.forEach((requirement, shieldIndex) => {
@@ -135,8 +131,8 @@ export default {
                     const nextSection = i + 1 < sections.length ? sections[i + 1] : sections[0];
                     if (previousSection && previousSection.type == 'conduction' && nextSection.type == 'conduction') {
                         shieldsAtInterface(insulationInterfaceIndex,
-                                           windingIndexOf(previousSection),
-                                           windingIndexOf(nextSection)).forEach((shieldIndex) => {
+                                           previousSection.partialWindings[0].winding,
+                                           nextSection.partialWindings[0].winding).forEach((shieldIndex) => {
                             placedShields.add(shieldIndex);
                             entries.push({
                                 encoded: this.conductiveSections.length + shieldIndex,

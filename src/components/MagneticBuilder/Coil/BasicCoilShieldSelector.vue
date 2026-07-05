@@ -83,9 +83,6 @@ export default {
                 return label;
             };
 
-            const windingIndexOf = (section) =>
-                functionalDescription.findIndex((winding) => winding.name == section.partialWindings[0].winding);
-
             const interfaces = [];
             for (let i = 0; i < sections.length; i++) {
                 if (sections[i].type == 'conduction') {
@@ -98,9 +95,10 @@ export default {
                 }
                 interfaces.push({
                     index: interfaces.length,
-                    // winding indexes (0-based, functionalDescription order) so renames cannot break shields
-                    left: windingIndexOf(previousSection),
-                    right: windingIndexOf(nextSection),
+                    // winding names, as windings are referenced by name throughout MAS;
+                    // renames are propagated into shield references by renameWinding()
+                    left: previousSection.partialWindings[0].winding,
+                    right: nextSection.partialWindings[0].winding,
                     label: sideLabel(previousSection) + ' ↔ ' + sideLabel(nextSection)
                            + (i == sections.length - 1 ? ' (outer wrap)' : ''),
                 });

@@ -259,6 +259,15 @@ export default {
                     }
                 });
             }
+            // Shielding requirements reference windings by name too
+            (this.masStore.mas.inputs?.designRequirements?.shielding || []).forEach((requirement) => {
+                if (Array.isArray(requirement.betweenWindings)) {
+                    requirement.betweenWindings = requirement.betweenWindings.map((name) => shouldRename(name) ? newName : name);
+                }
+                if (shouldRename(requirement.terminatedTo)) {
+                    requirement.terminatedTo = newName;
+                }
+            });
         },
         // Blind detection is case-insensitive so both the canonical lowercase
         // "blind" and any legacy capitalised "Blind" count as winding-to-winding
