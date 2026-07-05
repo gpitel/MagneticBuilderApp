@@ -109,6 +109,21 @@ export default {
             return this.masStore.mas.inputs?.designRequirements?.shielding || [];
         },
     },
+    watch: {
+        // Shields declared elsewhere (requirements card, hand-written files) may arrive
+        // without a thickness; give them the default so the Thickness input has a value
+        // (a wound screen with a wire is sized from the wire instead)
+        shieldRequirements: {
+            immediate: true,
+            handler(requirements) {
+                requirements.forEach((requirement) => {
+                    if (requirement.thickness == null && !(requirement.type == 'wound' && requirement.wire)) {
+                        requirement.thickness = 0.0001;
+                    }
+                });
+            },
+        },
+    },
     methods: {
         // The interface a shield tile points at: its first listed ordinal, or the first
         // interface matching its winding pair when no interfaces restriction is set
@@ -183,12 +198,18 @@ export default {
             requirement.type = type;
             if (type != 'wound') {
                 delete requirement.wire;
+                if (requirement.thickness == null) {
+                    requirement.thickness = 0.0001;
+                }
             }
             this.$emit('marginUpdated');
         },
         shieldWireChanged(requirement, value) {
             if (value == '') {
                 delete requirement.wire;
+                if (requirement.thickness == null) {
+                    requirement.thickness = 0.0001;
+                }
             }
             else {
                 requirement.wire = value;
