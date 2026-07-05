@@ -354,13 +354,6 @@ export default {
                     :allowZero="false"
                     :modelValue="requirement"
                     :forceUpdate="forceUpdate"
-                    :labelWidthProportionClass="'col-12 md:col-7'"
-                    :valueWidthProportionClass="'col-12 md:col-5'"
-                    :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
-                    :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
-                    :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
-                    :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
-                    :textColor="$styleStore.magneticBuilder.inputTextColor"
                     @update="shieldThicknessUpdated"
                 />
             </div>
@@ -548,11 +541,14 @@ export default {
     flex: 0 0 auto;
 }
 
-/* Let long Dimension labels wrap instead of clipping with an ellipsis */
+/* Let long Dimension labels wrap instead of clipping with an ellipsis, and match
+   the size of the tile's own labels (.shield-connection-label) */
 .shield-panel-body :deep(.dim-label) {
     white-space: normal;
     overflow: visible;
     text-overflow: unset;
     line-height: 1.2;
+    font-size: 0.95rem;
+    font-weight: 400;
 }
 </style>
