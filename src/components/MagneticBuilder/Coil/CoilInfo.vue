@@ -52,6 +52,7 @@ export default {
         const lastSimulatedMagnetics = "";
         const lastSimulatedModels = "";
         const dataUptoDate = false;
+        const simulationError = '';
         const subscriptions = [];
 
         return {
@@ -66,6 +67,7 @@ export default {
             lastSimulatedMagnetics,
             lastSimulatedModels,
             dataUptoDate,
+            simulationError,
             subscriptions,
             _simTimer: null,
             _waitTimer: null,
@@ -320,13 +322,21 @@ export default {
                         this.masStore.mas.outputs = deepCopy(mas.outputs);
                         this.loading = false;
                         this.dataUptoDate = true;
+                        this.simulationError = '';
                     })
                     .catch(error => {
+                        // Show the real MKF error in the panel — a console-only
+                        // error made simulation failures look like a silent hang.
+                        this.simulationError = error?.message || String(error);
+                        this.dataUptoDate = false;
                         console.error('[CoilInfo] Simulation error:', error);
                         this.loading = false;
                     });
                 }
                 else {
+                    // Inputs match the last successful simulation — the shown
+                    // values are valid, so any lingering error is stale.
+                    this.simulationError = '';
                     this.dataUptoDate = true;
                     this.loading = false;
                 }
@@ -353,6 +363,11 @@ export default {
         </div>
 
         <div class="coilinfo-body">
+            <h6
+                v-if="simulationError"
+                :data-cy="dataTestLabel + '-CoilInfo-SimulationError'"
+                class="text-danger my-2"
+            >{{ simulationError }}</h6>
             <img
                 :data-cy="dataTestLabel + '-BasicCoilInfo-loading'"
                 v-if="loading"

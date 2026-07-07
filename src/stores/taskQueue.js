@@ -523,7 +523,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 {
                     const result = await mkf.get_core_temperature_dependant_parameters(JSON.stringify(magnetic.core), inputs.operatingPoints[operatingPointIndex].conditions.ambientTemperature);
                     if (result.startsWith("Exception")) {
-                        return null;
+                        throw new Error(result);
                     }
                     else {
                         coreTemperatureDependantParametersData = JSON.parse(result);
@@ -534,7 +534,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 {
                     const result = await mkf.calculate_inductance_from_number_turns_and_gapping(JSON.stringify(magnetic.core), JSON.stringify(magnetic.coil), JSON.stringify(inputs.operatingPoints[operatingPointIndex]), JSON.stringify(modelsData));
                     if (result == -1) {
-                        return null;
+                        throw new Error("Exception: calculate_inductance_from_number_turns_and_gapping failed (worker returned -1)");
                     }
                     else {
                         // Result is already a number from the worker, no need to parse
@@ -545,7 +545,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 {
                     const result = await mkf.calculate_core_losses(JSON.stringify(magnetic.core), JSON.stringify(magnetic.coil), JSON.stringify(inputs), JSON.stringify(modelsData), operatingPointIndex);
                     if (result.startsWith("Exception")) {
-                        return null;
+                        throw new Error(result);
                     }
                     else {
                         coreLossesData = JSON.parse(result);
@@ -569,8 +569,13 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 setTimeout(() => {this.coreLossesCalculated(true, data);}, this.task_standard_response_delay);
                 return data;
             } catch (error) {
-                // Silently return null - data may be incomplete during editing
-                return null;
+                // Surface the failure — a silent null here hid real MKF errors
+                // (e.g. COIL_NOT_PROCESSED on a degenerate operating point) and the
+                // UI just showed nothing. Editing-time incomplete data is already
+                // filtered by the guard at the top of this method.
+                const message = error?.message || String(error);
+                setTimeout(() => {this.coreLossesCalculated(false, message);}, this.task_standard_response_delay);
+                throw error;
             }
         },
 
@@ -1333,7 +1338,14 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             await mkf.ready;
 
             masSentry('adviseAllWires', mas, 'Mas');
-            const resultMasWithCoil = await mkf.calculate_advised_coil(JSON.stringify(mas));
+            // #77 hang capture: stash the byte-exact payload BEFORE the (synchronous-in-worker)
+            // WASM call. If calculate_advised_coil never returns, this is the repro fixture —
+            // copy(window.__wireAdviseCapture) → MKF/tests/payloads/wire_adviser_hang.json.
+            const advisePayload = JSON.stringify(mas);
+            if (typeof window !== 'undefined') window.__wireAdviseCapture = advisePayload;
+            console.warn(`[#77] calculate_advised_coil ENTER (adviseAllWires, ${advisePayload.length} bytes)`);
+            const resultMasWithCoil = await mkf.calculate_advised_coil(advisePayload);
+            console.warn('[#77] calculate_advised_coil EXIT (adviseAllWires)');
 
             if (resultMasWithCoil.startsWith("Exception")) {
                 setTimeout(() => {this.allWiresAdvised(false, resultMasWithCoil);}, this.task_standard_response_delay);
@@ -1380,7 +1392,12 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             await mkf.ready;
 
             masSentry('adviseWire', mas, 'Mas');
-            const resultMasWithCoil = await mkf.calculate_advised_coil(JSON.stringify(mas));
+            // #77 hang capture — see adviseAllWires above.
+            const advisePayload = JSON.stringify(mas);
+            if (typeof window !== 'undefined') window.__wireAdviseCapture = advisePayload;
+            console.warn(`[#77] calculate_advised_coil ENTER (adviseWire, ${advisePayload.length} bytes)`);
+            const resultMasWithCoil = await mkf.calculate_advised_coil(advisePayload);
+            console.warn('[#77] calculate_advised_coil EXIT (adviseWire)');
 
             if (resultMasWithCoil.startsWith("Exception")) {
                 setTimeout(() => {this.allWiresAdvised(false, resultMasWithCoil);}, this.task_standard_response_delay);
@@ -2060,24 +2077,5 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
         },
 
-        capacitanceModelsBetweenWindingsCalculated(success = true, dataOrMessage = '') {
-        },
-
-        async calculateCapacitanceModelsBetweenWindings(energy, voltageDrop, relativeTurnsRatio) {
-            const mkf = await waitForMkf();
-            await mkf.ready;
-
-            const result = await mkf.calculate_capacitance_models_between_windings(energy, voltageDrop, relativeTurnsRatio);
-
-            if (result.startsWith("Exception")) {
-                setTimeout(() => {this.capacitanceModelsBetweenWindingsCalculated(false, result);}, this.task_standard_response_delay);
-                throw new Error(result);
-            }
-            else {
-                const models = JSON.parse(result);
-                setTimeout(() => {this.capacitanceModelsBetweenWindingsCalculated(true, models);}, this.task_standard_response_delay);
-                return models;
-            }
-        },
     }
 })
