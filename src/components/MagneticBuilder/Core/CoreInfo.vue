@@ -43,6 +43,7 @@ export default {
         const recentChange = false;
         const tryingToSend = false;
         const dataUptoDate = false;
+        const simulationError = '';
         const subscriptions = [];
 
         return {
@@ -56,6 +57,7 @@ export default {
             recentChange,
             tryingToSend,
             dataUptoDate,
+            simulationError,
             subscriptions,
         }
     },
@@ -228,9 +230,14 @@ export default {
                         this.coreLossesData = data.coreLossesData;
                         this.magnetizingInductanceCheck = data.magnetizingInductanceCheck;
                         this.dataUptoDate = true;
+                        this.simulationError = '';
                     }
                 })
                 .catch(error => {
+                    // Show the real MKF error in the panel — a console-only error
+                    // left the user staring at losses that never arrive.
+                    this.simulationError = error?.message || String(error);
+                    this.dataUptoDate = false;
                     console.error(error);
                 });
             }
@@ -249,6 +256,11 @@ export default {
             <div v-if="!dataUptoDate && hasCalculableData" class="coreinfo-outdated-badge">Outdated</div>
         </div>
         <div class="coreinfo-body">
+            <h6
+                v-if="simulationError"
+                :data-cy="dataTestLabel + '-CoreInfo-SimulationError'"
+                class="text-danger my-2"
+            >{{ simulationError }}</h6>
             <template v-if="advancedMode">
                 <div class="coreinfo-grid" :class="{ 'coreinfo-dimmed': !dataUptoDate }" v-if="coreEffectiveParameters.effectiveLength != null">
                     <div class="coreinfo-cell">
