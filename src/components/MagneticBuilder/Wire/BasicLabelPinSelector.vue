@@ -43,7 +43,7 @@ export default {
             // stored on the connection stays verbatim (the lowercase enum value) so it
             // round-trips to MAS unchanged.
             connectionTypeLabels: {
-                blind: 'Blind', flyingLead: 'Flying Lead', pcbPad: 'PCB Pad',
+                blind: 'Blind', chassis: 'Chassis', flyingLead: 'Flying Lead', pcbPad: 'PCB Pad',
                 pin: 'Pin', smt: 'SMT', screw: 'Screw', tht: 'THT',
             },
             connectionTypeOptions: Object.values(ConnectionType),
