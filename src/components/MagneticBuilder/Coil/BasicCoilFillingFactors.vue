@@ -26,6 +26,16 @@ export default {
         }
     },
     computed: {
+        // Fill factor above 100 % = the winding physically cannot fit this core
+        // (ABT #147: Core Advise keeps the wire while swapping the core).
+        windingDoesNotFit() {
+            const f = this.data?.fillingFactors;
+            if (f == null) return false;
+            if (f.areaFillingFactor > 1) return true;
+            if (this.data.sectionsOrientation == 'contiguous' && f.contiguousFillingFactor > 1) return true;
+            if (this.data.sectionsOrientation == 'overlapping' && f.overlappingFillingFactor > 1) return true;
+            return false;
+        },
         contiguousLabel() {
             try {
                 if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].shape == "rectangular") {
@@ -137,6 +147,14 @@ export default {
                         :textColor="data.fillingFactors.overlappingFillingFactor < 0.8? $styleStore.magneticBuilder.inputTextColor : $styleStore.magneticBuilder.inputLabelDangerBgColor"
                     />
                 </div>
+                <label
+                    v-if="windingDoesNotFit"
+                    :data-cy="dataTestLabel + '-WindingDoesNotFit-warning'"
+                    class="filling-nofit-warning"
+                    :style="{ color: $styleStore.magneticBuilder.inputLabelDangerBgColor }"
+                >
+                    Winding does not fit this core (fill factor above 100 %). Advise a new wire or pick a larger core.
+                </label>
             </div>
         </div>
     </div>
@@ -198,5 +216,14 @@ export default {
     border: 1px solid rgba(var(--p-white-rgb), 0.04);
     border-radius: 10px;
     padding: 0.5rem 0.6rem;
+}
+.filling-nofit-warning {
+    display: block;
+    grid-column: 1 / -1;
+    width: 100%;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+    padding: 0.2rem 0.4rem;
 }
 </style>

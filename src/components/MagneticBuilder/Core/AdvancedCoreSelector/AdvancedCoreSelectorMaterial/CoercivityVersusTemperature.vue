@@ -5,6 +5,7 @@ import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
 import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
 import Text from '/WebSharedComponents/DataInput/Text.vue'
+import { useTaskQueueStore } from '../../../../../stores/taskQueue'
 
 </script>
 
@@ -51,10 +52,13 @@ export default {
 
         const localData = [];
 
+        const taskQueueStore = useTaskQueueStore();
+
         return {
             indexes,
             configuration,
             localData,
+            taskQueueStore,
         }
     },
     watch: {

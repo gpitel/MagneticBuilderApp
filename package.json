@@ -1,7 +1,26 @@
 {
-  "name": "my-vue-app",
+  "name": "openmagnetics-magnetic-builder",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Embeddable MagneticBuilder app for OpenMagnetics — the core/wire/coil design and analysis UI used by openmagnetics.com and partner frontends.",
+  "license": "MIT",
+  "author": "OpenMagnetics",
+  "homepage": "https://openmagnetics.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenMagnetics/MagneticBuilderApp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OpenMagnetics/MagneticBuilderApp/issues"
+  },
+  "keywords": [
+    "magnetics",
+    "transformer",
+    "inductor",
+    "magnetic-design",
+    "webassembly",
+    "vue"
+  ],
   "type": "module",
   "scripts": {
     "start": "vite",
