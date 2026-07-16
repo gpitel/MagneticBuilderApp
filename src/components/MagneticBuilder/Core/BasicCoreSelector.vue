@@ -457,7 +457,15 @@ export default {
         },
         adviseCore() {
             if (this.masStore.mas.inputs.operatingPoints.length > 0) {
-                this.$settingsStore.adviserSettings.coreAdviseMode = "standard cores";
+                // ABT #153: respect the user's configured core-advise mode
+                // (Settings -> adviserSettings.coreAdviseMode). This used to be
+                // hardcoded to "standard cores", overriding the user's choice —
+                // so the Core Advise button could return zero candidates for
+                // designs that only the "available cores" catalogue serves
+                // (e.g. PFC boost inductors -> powder toroids), with no way for
+                // the user to switch. The spread below already carries
+                // coreAdviseMode from adviserSettings, and taskQueue.adviseCore
+                // sanitises a non-string value defensively.
 
                 // Use magneticBuilderSettings (where the UI toggles write)
                 // instead of adviserSettings (which is never updated by the UI)

@@ -260,7 +260,7 @@ export default {
         <div class="row">
             <div v-for="value, key in masStore.mas.magnetic.coil.functionalDescription" :key="key">
                 <BasicWireSelector
-                    v-if="selectedWindingIndex==key && (masStore.mas.inputs.designRequirements.wiringTechnology == null || masStore.mas.inputs.designRequirements.wiringTechnology == 'wound')"
+                    v-if="selectedWindingIndex==key && (masStore.mas.inputs.designRequirements.wiringTechnology == null || masStore.mas.inputs.designRequirements.wiringTechnology.toLowerCase() == 'wound')"
                     :masStore="masStore"
                     :readOnly="readOnly"
                     :operatingPointIndex="operatingPointIndex"
@@ -277,7 +277,7 @@ export default {
                     @windingIndexChanged="windingIndexChanged"
                 />
                 <PlanarWireSelector
-                    v-if="selectedWindingIndex==key && (masStore.mas.inputs.designRequirements.wiringTechnology != null && masStore.mas.inputs.designRequirements.wiringTechnology == 'printed')"
+                    v-if="selectedWindingIndex==key && (masStore.mas.inputs.designRequirements.wiringTechnology != null && masStore.mas.inputs.designRequirements.wiringTechnology.toLowerCase() == 'printed')"
                     :masStore="masStore"
                     :readOnly="readOnly"
                     :operatingPointIndex="operatingPointIndex"

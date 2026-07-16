@@ -4,6 +4,7 @@ import { checkAndFixMas, clean, toTitleCase, deepCopy } from '/WebSharedComponen
 import { wireMaterialDefault } from '/WebSharedComponents/assets/js/defaults.js'
 import { Convert as MasConvert } from '/WebSharedComponents/assets/ts/MAS.ts'
 import { useSettingsStore } from './settings'
+import { useInventoryStore } from './inventory'
 
 // Returns the restricted shape-family whitelist (lowercase) if set in
 // magneticBuilderSettings, or null when no restriction applies. Defensive
@@ -949,6 +950,28 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             return handle;
         },
 
+        volumetricLossesSwept(success = true, dataOrMessage = '') {
+        },
+
+        // ABT #166: engine-computed Pv(f) samples for any loss model of a
+        // material (steinmetz, roshen, proprietary, loss maps). `material`
+        // can be a DB name or a full CoreMaterial object.
+        async sweepVolumetricLossesOverFrequency(material, temperature, magneticFluxDensityPeak, start, stop, numberElements, method = '') {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const result = await mkf.sweep_volumetric_losses_over_frequency(
+                typeof material === 'string' ? material : JSON.stringify(clean(material)),
+                temperature, magneticFluxDensityPeak, start, stop, numberElements, method);
+            if (typeof result === 'string' && result.startsWith('Exception')) {
+                setTimeout(() => { this.volumetricLossesSwept(false, result); }, this.task_standard_response_delay);
+                throw new Error(result);
+            }
+            const sweep = JSON.parse(result);
+            setTimeout(() => { this.volumetricLossesSwept(true, sweep); }, this.task_standard_response_delay);
+            return sweep;
+        },
+
         coreVolumetricLossesEquationsGotten(success = true, dataOrMessage = '') {
         },
 
@@ -1330,6 +1353,22 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
         },
 
+        // Route calculate_advised_coil through the accounts inventory scope
+        // (ABT #232): with scope 'only my inventory' the wire pool must come
+        // from the loaded LibraryContext, not the public catalog. Embedded in
+        // WebFrontend the inventory store is the host's full implementation;
+        // standalone MB keeps scope 'public' and always takes the classic path.
+        async callCalculateAdvisedCoil(mkf, advisePayload) {
+            const inventoryStore = useInventoryStore();
+            if (inventoryStore.scope === 'only') {
+                if (!inventoryStore.engineContextLoaded) {
+                    throw new Error("Adviser scope is 'only my inventory' but your inventory could not be loaded into the engine — sign in again or reload the page (see console for the original error).");
+                }
+                return await mkf.calculate_advised_coil_with_context(advisePayload, true);
+            }
+            return await mkf.calculate_advised_coil(advisePayload);
+        },
+
         allWiresAdvised(success = true, dataOrMessage = '') {
         },
 
@@ -1344,7 +1383,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const advisePayload = JSON.stringify(mas);
             if (typeof window !== 'undefined') window.__wireAdviseCapture = advisePayload;
             console.warn(`[#77] calculate_advised_coil ENTER (adviseAllWires, ${advisePayload.length} bytes)`);
-            const resultMasWithCoil = await mkf.calculate_advised_coil(advisePayload);
+            const resultMasWithCoil = await this.callCalculateAdvisedCoil(mkf, advisePayload);
             console.warn('[#77] calculate_advised_coil EXIT (adviseAllWires)');
 
             if (resultMasWithCoil.startsWith("Exception")) {
@@ -1396,7 +1435,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const advisePayload = JSON.stringify(mas);
             if (typeof window !== 'undefined') window.__wireAdviseCapture = advisePayload;
             console.warn(`[#77] calculate_advised_coil ENTER (adviseWire, ${advisePayload.length} bytes)`);
-            const resultMasWithCoil = await mkf.calculate_advised_coil(advisePayload);
+            const resultMasWithCoil = await this.callCalculateAdvisedCoil(mkf, advisePayload);
             console.warn('[#77] calculate_advised_coil EXIT (adviseWire)');
 
             if (resultMasWithCoil.startsWith("Exception")) {

@@ -210,15 +210,17 @@ export default {
         },
         onDimensionUpdate(temperatureIndex, event, seriesIndex, index) {
             if (!this.blockingRebounds) {
-                if (this.event != null) {
-                    if (this.event.dimension == 'frequency') {
+                // The guard used to check `this.event` (always undefined), so
+                // inline edits were silently dropped; use the event argument.
+                if (event != null) {
+                    if (event.dimension == 'frequency') {
                         this.volumetricLossesPoints[this.indexes[temperatureIndex][seriesIndex][index]].magneticFluxDensity.frequency = event.value;
                     }
 
-                    if (this.event.dimension == 'magneticFluxDensity') {
+                    if (event.dimension == 'magneticFluxDensity') {
                         this.volumetricLossesPoints[this.indexes[temperatureIndex][seriesIndex][index]].magneticFluxDensity.magneticFluxDensity.processed.peak = event.value;
                     }
-                    if (this.event.dimension == 'value') {
+                    if (event.dimension == 'value') {
                         this.volumetricLossesPoints[this.indexes[temperatureIndex][seriesIndex][index]].value = event.value;
                     }
                 }

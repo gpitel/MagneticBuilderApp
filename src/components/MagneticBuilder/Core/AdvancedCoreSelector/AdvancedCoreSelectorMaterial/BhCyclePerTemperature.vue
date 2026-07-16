@@ -108,7 +108,10 @@ export default {
             this.assignLocalData();
         },
         onDimensionUpdate(event, seriesIndex, index) {
-            this.data[this.indexes[seriesIndex][index]] = event.value;
+            // Update the edited field of the point; assigning the raw scalar
+            // over the whole {temperature, H, B} object corrupted the record.
+            this.data[this.indexes[seriesIndex][index]][event.dimension] = event.value;
+            this.assignLocalData();
         },
     }
 }

@@ -220,7 +220,7 @@ export default {
     <div v-if="!missingWires && masStore.mas.magnetic.core != null && masStore.mas.magnetic.core.functionalDescription.shape != ''" class="container">
         <div class="row">
             <BasicCoilSelector
-                v-if="(masStore.mas.inputs.designRequirements.wiringTechnology == null || masStore.mas.inputs.designRequirements.wiringTechnology == 'wound')"
+                v-if="(masStore.mas.inputs.designRequirements.wiringTechnology == null || masStore.mas.inputs.designRequirements.wiringTechnology.toLowerCase() == 'wound')"
                 :masStore="masStore"
                 :readOnly="readOnly"
                 :operatingPointIndex="operatingPointIndex"

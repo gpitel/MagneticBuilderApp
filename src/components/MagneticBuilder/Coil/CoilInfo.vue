@@ -103,6 +103,19 @@ export default {
                 return "width";
             }
         },
+        // Fill factor above 100 % means the winding physically cannot fit this
+        // core. The tinted number alone proved too subtle: the Core "Advise"
+        // button keeps the existing wire while swapping the core, and shipped
+        // designs ended up at >200 % with only an orange digit as feedback
+        // (ABT #147).
+        windingDoesNotFit() {
+            const f = this.fillingFactors;
+            if (f == null) return false;
+            if (f.areaFillingFactor > 1) return true;
+            if (this.sectionsOrientation == 'contiguous' && f.contiguousFillingFactor > 1) return true;
+            if (this.sectionsOrientation == 'overlapping' && f.overlappingFillingFactor > 1) return true;
+            return false;
+        },
     },
     watch: {
         'operatingPointIndex': {
@@ -252,9 +265,16 @@ export default {
             }
 
             if (outputs[this.operatingPointIndex].inductance.leakageInductance?.leakageInductancePerWinding) {
-                for (let windingIndex = 0; windingIndex < this.masStore.mas.magnetic.coil.functionalDescription.length - 1; windingIndex++) {
-                    const leakageInductance = outputs[this.operatingPointIndex].inductance.leakageInductance.leakageInductancePerWinding[windingIndex].nominal;
-                    this.outputsData.leakageInductancePerWinding.push(leakageInductance);
+                const perWinding = outputs[this.operatingPointIndex].inductance.leakageInductance.leakageInductancePerWinding;
+                const numberWindings = this.masStore.mas.magnetic.coil.functionalDescription.length;
+                // The engine emits a winding-indexed array (N entries, 0 at the primary slot);
+                // outputs saved by older versions carry a legacy secondaries-only (N-1) shape.
+                const windingIndexed = perWinding.length === numberWindings;
+                for (let windingIndex = 1; windingIndex < numberWindings; windingIndex++) {
+                    const entry = perWinding[windingIndexed ? windingIndex : windingIndex - 1];
+                    if (entry != null) {
+                        this.outputsData.leakageInductancePerWinding.push(entry.nominal);
+                    }
                 }
             }
             for (let windingIndex = 0; windingIndex < this.masStore.mas.magnetic.coil.functionalDescription.length; windingIndex++) {
@@ -541,6 +561,15 @@ export default {
                         />
                     </div>
                 </div>
+
+                <label
+                    v-if="windingDoesNotFit"
+                    :data-cy="dataTestLabel + '-WindingDoesNotFit-warning'"
+                    class="coilinfo-nofit-warning"
+                    :style="{ color: $styleStore.magneticBuilder.inputLabelDangerBgColor }"
+                >
+                    Winding does not fit this core (fill factor above 100 %). Advise a new wire or pick a larger core.
+                </label>
 
                 <div class="coilinfo-winding-bar">
                     <WindingSelector
@@ -912,6 +941,15 @@ export default {
     line-height: 1.25 !important;
 }
 
+.coilinfo-nofit-warning {
+    display: block;
+    grid-column: 1 / -1;
+    width: 100%;
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+    padding: 0.2rem 0.4rem;
+}
 .coilinfo-winding-bar {
     margin: 0.5rem 0;
 }
