@@ -388,13 +388,14 @@ export interface ImpedancePoint {
 /**
  * PCB / terminal connection type. Superset of MAS schemas/utils.json#/$defs/connectionType:
  * includes every MAS value (pin, screw, smt, flyingLead, tht, pcbPad) plus PEAS-only
- * additions (chassis). Case-style aligned to MAS (lowerCamelCase) since MAS is the IEC
- * standard candidate.
+ * additions (chassis, blind). A blind connection is an unexposed splice joining one
+ * winding to another inside the assembly, with no externally accessible terminal.
+ * Case-style aligned to MAS (lowerCamelCase) since MAS is the IEC standard candidate.
  *
  * PCB mounting style. Uses the same connectionType enum as designRequirements.terminalType.
  */
 export enum ConnectionType {
-    Blind = "blind",
+    Blind = "blind", // unexposed splice joining one winding to another; no external terminal
     Chassis = "chassis",
     FlyingLead = "flyingLead",
     PCBPad = "pcbPad",
@@ -5613,6 +5614,7 @@ const typeMap: any = {
         "space",
     ],
     "ConnectionType": [
+        "blind",
         "chassis",
         "flyingLead",
         "pcbPad",
