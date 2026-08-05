@@ -511,10 +511,23 @@ export default {
 
                 this.$emit("fits", true);
                 try {
-                    const pattern = [];
-                    this.localData.pattern.split('').forEach((char) => {
-                        pattern.push(Number(char) - 1);
-                    });
+                    // The interleaving order is held as ONE CHARACTER PER WINDING (the
+                    // ListOfCharacters widget above binds to it), so it cannot express a
+                    // tenth winding: index 9 is written "10", and reading it a character at
+                    // a time yields TWO entries -- '1' -> 0, a duplicate of winding 1, and
+                    // '0' -> -1. As a size_t in the engine that -1 becomes 2^64-1, a winding
+                    // is left with no section slot, and wind() answers "Number of slots
+                    // cannot be less than 1, please verify your isolation sides requirement".
+                    // That message sends the reader to the isolation sides, which are fine.
+                    //
+                    // Above nine windings the string is genuinely ambiguous ("12345678910"
+                    // could be 1..10 or 1..9,1,0), so there is nothing to recover: fall back
+                    // to the declared winding order, which is what the widget would have
+                    // meant. Nine or fewer keeps reading the user's chosen interleaving.
+                    const windingCount = inputCoil.functionalDescription.length;
+                    const pattern = (windingCount > 9)
+                        ? inputCoil.functionalDescription.map((winding, index) => index)
+                        : this.localData.pattern.split('').map((char) => Number(char) - 1);
 
                     this.taskQueueStore.wind(inputCoil, this.localData.repetitions, this.localData.proportionPerWinding, pattern, margins).then((coil) => {
                         this.taskQueueStore.calculateFillingFactors(coil).then((fillingFactors) => {
