@@ -9,6 +9,7 @@ import BasicCoilSectionInsulationSelector from './BasicCoilSectionInsulationSele
 import BasicCoilSectionAlignmentSelector from './BasicCoilSectionAlignmentSelector.vue'
 import Magnetic2DVisualizer from '/WebSharedComponents/Common/Magnetic2DVisualizer.vue'
 import { toTitleCase, checkAndFixMas, deepCopy, roundWithDecimals, cleanCoil, generateHash } from '/WebSharedComponents/assets/js/utils.js'
+import { bobbinWindow, bobbinProcessed } from '/WebSharedComponents/assets/js/bobbinAccess.js'
 import { useHistoryStore } from '../../../stores/history'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 
@@ -380,8 +381,13 @@ export default {
         },
         getProportionsAndPattern(coil) {
             if (coil.sectionsDescription != null) {
-                const bobbinShape = coil.bobbin.processedDescription.windingWindows[0].shape;
-                const sectionsOrientation = coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation;
+                // Via bobbinWindow(): `coil.bobbin` is an ARRAY for a per-column
+                // (Convention A) magnetic, and an array has no processedDescription, so
+                // the direct read threw here on mount and aborted the whole method --
+                // leaving proportions and pattern unset for a per-leg design.
+                const firstWindow = bobbinWindow(coil) ?? {};
+                const bobbinShape = firstWindow.shape;
+                const sectionsOrientation = firstWindow.sectionsOrientation;
 
                 let windingDimensions = [];
                 coil.functionalDescription.forEach((winding, windingIndex) => {
@@ -771,11 +777,18 @@ export default {
                 return;
             }
 
-            // Check if thickness actually changed from current bobbin to avoid infinite loop
-            const currentBobbin = this.masStore.mas.magnetic.coil.bobbin;
-            if (currentBobbin && currentBobbin !== "Dummy" && currentBobbin.processedDescription) {
-                const currentWall = currentBobbin.processedDescription.wallThickness;
-                const currentColumn = currentBobbin.processedDescription.columnThickness;
+            // Check if thickness actually changed from current bobbin to avoid infinite loop.
+            //
+            // Read through bobbinProcessed(): for a per-column (Convention A) magnetic
+            // `coil.bobbin` is an ARRAY, which has no processedDescription, so the direct
+            // read returned undefined and this guard FAILED OPEN -- falling through to
+            // regenerate a SINGLE bobbin and silently replacing the per-leg array with a
+            // scalar. That is what collapsed a two-leg design to one winding window a few
+            // seconds after load, which then made every window index 1 out of range.
+            const currentProcessed = bobbinProcessed(this.masStore.mas.magnetic.coil);
+            if (currentProcessed) {
+                const currentWall = currentProcessed.wallThickness;
+                const currentColumn = currentProcessed.columnThickness;
                 const newWall = this.localData.bobbinWallThickness;
                 const newColumn = this.localData.bobbinColumnThickness;
                 
