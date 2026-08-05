@@ -9,7 +9,7 @@ import BasicCoilSectionInsulationSelector from './BasicCoilSectionInsulationSele
 import BasicCoilSectionAlignmentSelector from './BasicCoilSectionAlignmentSelector.vue'
 import Magnetic2DVisualizer from '/WebSharedComponents/Common/Magnetic2DVisualizer.vue'
 import { toTitleCase, checkAndFixMas, deepCopy, roundWithDecimals, cleanCoil, generateHash } from '/WebSharedComponents/assets/js/utils.js'
-import { bobbinWindow, bobbinProcessed } from '/WebSharedComponents/assets/js/bobbinAccess.js'
+import { bobbinWindow, bobbinProcessed, bobbinEntries } from '/WebSharedComponents/assets/js/bobbinAccess.js'
 import { useHistoryStore } from '../../../stores/history'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 
@@ -798,7 +798,35 @@ export default {
             }
 
             this.taskQueueStore.generateBobbinDifferentThicknesses(this.masStore.mas.magnetic.core, this.localData.bobbinWallThickness, this.localData.bobbinColumnThickness).then((bobbin) => {
-                this.masStore.mas.magnetic.coil.bobbin = bobbin;
+                // A per-column (Convention A) coil carries one bobbin per leg and the leg
+                // mapping IS the array position, so assigning the single regenerated bobbin
+                // here would drop the mapping along with the second window, leaving every
+                // section that names window 1 unresolvable.
+                //
+                // Patch the two thickness fields on each element in place rather than
+                // swapping in the regenerated processedDescription wholesale. Two reasons,
+                // and the first one cost a debugging round: a freshly generated description
+                // grafted onto an existing element produced a coil the engine answered
+                // "Could not deserialise!" to. The second is geometry -- the generated
+                // description describes ONE bobbin derived from the core, so its windows
+                // would overwrite the per-leg windows with a single-window guess.
+                //
+                // Window dimensions are deliberately NOT re-derived here. For a single
+                // bobbin the engine does that from the core; for a per-leg set there is no
+                // single answer, and inventing one is worse than leaving the windows as the
+                // author stated them.
+                const entries = bobbinEntries(this.masStore.mas.magnetic.coil);
+                if (entries.length > 1) {
+                    entries.forEach((entry) => {
+                        if (entry?.processedDescription != null) {
+                            entry.processedDescription.wallThickness = this.localData.bobbinWallThickness;
+                            entry.processedDescription.columnThickness = this.localData.bobbinColumnThickness;
+                        }
+                    });
+                }
+                else {
+                    this.masStore.mas.magnetic.coil.bobbin = bobbin;
+                }
                 this.coilUpdated();
             })
             .catch(error => {
