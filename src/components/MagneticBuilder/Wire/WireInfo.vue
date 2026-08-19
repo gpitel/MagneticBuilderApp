@@ -6,6 +6,7 @@ import { useTaskQueueStore } from '../../../stores/taskQueue'
 </script>
 
 <script>
+import { bobbinWindow } from '/WebSharedComponents/assets/js/bobbinAccess.js'
 
 export default {
     props: {
@@ -78,43 +79,28 @@ export default {
             return this.skinAcFactor > 2;
         },
         fitsOuterDimensionsWidth() {
-            if (this.masStore.mas.magnetic.coil.bobbin != "Dummy") {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].width != null) {
-                    if (this.outerDimensions[0] < this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].width) {
-                        return true;
-                    }
-                    else {
-                        return false;
-                    }
+            // Window 0 of the first bobbin, as before -- but via the accessor, because
+            // coil.bobbin may be a per-column ARRAY, which has no processedDescription
+            // and slips past a bare != "Dummy" guard.
+            const window = bobbinWindow(this.masStore.mas.magnetic.coil);
+            if (window != null) {
+                if (window.width != null) {
+                    return this.outerDimensions[0] < window.width;
                 }
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].radialHeight != null) {
-                    if (this.outerDimensions[0] < this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].radialHeight / 2) {
-                        return true;
-                    }
-                    else {
-                        return false;
-                    }
+                if (window.radialHeight != null) {
+                    return this.outerDimensions[0] < window.radialHeight / 2;
                 }
             }
             return true;
         },
         fitsOuterDimensionsHeight() {
-            if (this.masStore.mas.magnetic.coil.bobbin != "Dummy") {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].height != null) {
-                    if (this.outerDimensions[1] < this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].height) {
-                        return true;
-                    }
-                    else {
-                        return false;
-                    }
+            const window = bobbinWindow(this.masStore.mas.magnetic.coil);
+            if (window != null) {
+                if (window.height != null) {
+                    return this.outerDimensions[1] < window.height;
                 }
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].radialHeight != null) {
-                    if (this.outerDimensions[0] < this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].radialHeight / 2) {
-                        return true;
-                    }
-                    else {
-                        return false;
-                    }
+                if (window.radialHeight != null) {
+                    return this.outerDimensions[0] < window.radialHeight / 2;
                 }
             }
             return true;

@@ -443,7 +443,16 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
 
             if (mas.magnetic.core.functionalDescription.shape.type == "custom") {
-                coreShapeNames[mas.magnetic.core.functionalDescription.shape.family].unshift(mas.magnetic.core.functionalDescription.shape.name);
+                // A custom shape can belong to a family the catalog loops above skip on
+                // purpose (pqi, ut, ui, h, drum), and then there is no array to unshift onto:
+                // this threw "Cannot read properties of undefined (reading 'unshift')" and
+                // took the whole core step down, reported nowhere near the shape that caused
+                // it. The user's own shape has to appear in its family's list either way.
+                const shapeFamily = mas.magnetic.core.functionalDescription.shape.family;
+                if (coreShapeNames[shapeFamily] == null) {
+                    coreShapeNames[shapeFamily] = [];
+                }
+                coreShapeNames[shapeFamily].unshift(mas.magnetic.core.functionalDescription.shape.name);
             }
             setTimeout(() => {this.coreShapesGotten(true, coreShapeNames);}, this.task_standard_response_delay);
             return coreShapeNames;

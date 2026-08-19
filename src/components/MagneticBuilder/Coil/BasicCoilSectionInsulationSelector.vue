@@ -7,6 +7,7 @@ import { useTaskQueueStore } from '../../../stores/taskQueue'
 </script>
 
 <script>
+import { bobbinWindow, governingBobbin } from '/WebSharedComponents/assets/js/bobbinAccess.js'
 
 export default {
     emits: ['marginUpdated', 'closeInsulation'],
@@ -56,8 +57,11 @@ export default {
                 : null;
             return s ? `${s.topOrLeftMargin}|${s.bottomOrRightMargin}` : '';
         },
+        // coil.bobbin may be a per-column ARRAY, which has no processedDescription;
+        // these read window 0 of the first bobbin, as before. An absent window falls
+        // through to the non-contiguous wording rather than throwing mid-render.
         topOrLeftMarginTooltip() {
-            if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == 'contiguous') {
+            if (bobbinWindow(this.masStore.mas.magnetic.coil)?.sectionsOrientation == 'contiguous') {
                 return tooltipsMagneticBuilder.leftMargin;
             }
             else {
@@ -65,7 +69,7 @@ export default {
             }
         },
         bottomOrRightMarginTooltip() {
-            if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == 'contiguous') {
+            if (bobbinWindow(this.masStore.mas.magnetic.coil)?.sectionsOrientation == 'contiguous') {
                 return tooltipsMagneticBuilder.rightMargin;
             }
             else {
@@ -107,9 +111,11 @@ export default {
         },
         topOrInnerMarginUpdated(sectionIndex) {
             if (!this.blockingRebounds) {
-                const isMarginHorizontal = this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == "contiguous";
+                const isMarginHorizontal = bobbinWindow(this.masStore.mas.magnetic.coil)?.sectionsOrientation == "contiguous";
 
-                this.taskQueueStore.checkIfFits(this.masStore.mas.magnetic.coil.bobbin, this.data.dataPerSection[sectionIndex].topOrLeftMargin, isMarginHorizontal).then((fits) => {
+                // check_if_fits stringifies this into MKF as a single Bobbin, so hand it
+                // the governing bobbin rather than the whole per-column array.
+                this.taskQueueStore.checkIfFits(governingBobbin(this.masStore.mas.magnetic.coil), this.data.dataPerSection[sectionIndex].topOrLeftMargin, isMarginHorizontal).then((fits) => {
                     if (fits) {
                         this.$emit('marginUpdated', sectionIndex);
                         this.topOrLeftMarginErrorMessage = "";
@@ -125,8 +131,8 @@ export default {
         },
         bottomOrOuterMarginUpdated(sectionIndex) {
             if (!this.blockingRebounds) {
-                const isMarginHorizontal = this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == "contiguous";
-                this.taskQueueStore.checkIfFits(this.masStore.mas.magnetic.coil.bobbin, this.data.dataPerSection[sectionIndex].topOrLeftMargin, isMarginHorizontal).then((fits) => {
+                const isMarginHorizontal = bobbinWindow(this.masStore.mas.magnetic.coil)?.sectionsOrientation == "contiguous";
+                this.taskQueueStore.checkIfFits(governingBobbin(this.masStore.mas.magnetic.coil), this.data.dataPerSection[sectionIndex].topOrLeftMargin, isMarginHorizontal).then((fits) => {
                     if (fits) {
                         this.$emit('marginUpdated', sectionIndex);
                         this.bottomOrRightMarginErrorMessage = "";

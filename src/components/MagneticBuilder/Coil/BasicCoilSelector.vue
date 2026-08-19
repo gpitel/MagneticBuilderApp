@@ -9,6 +9,7 @@ import BasicCoilSectionInsulationSelector from './BasicCoilSectionInsulationSele
 import BasicCoilSectionAlignmentSelector from './BasicCoilSectionAlignmentSelector.vue'
 import Magnetic2DVisualizer from '/WebSharedComponents/Common/Magnetic2DVisualizer.vue'
 import { toTitleCase, checkAndFixMas, deepCopy, roundWithDecimals, cleanCoil, generateHash } from '/WebSharedComponents/assets/js/utils.js'
+import { bobbinWindow, bobbinProcessed, bobbinEntries } from '/WebSharedComponents/assets/js/bobbinAccess.js'
 import { useHistoryStore } from '../../../stores/history'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 
@@ -380,8 +381,13 @@ export default {
         },
         getProportionsAndPattern(coil) {
             if (coil.sectionsDescription != null) {
-                const bobbinShape = coil.bobbin.processedDescription.windingWindows[0].shape;
-                const sectionsOrientation = coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation;
+                // Via bobbinWindow(): `coil.bobbin` is an ARRAY for a per-column
+                // (Convention A) magnetic, and an array has no processedDescription, so
+                // the direct read threw here on mount and aborted the whole method --
+                // leaving proportions and pattern unset for a per-leg design.
+                const firstWindow = bobbinWindow(coil) ?? {};
+                const bobbinShape = firstWindow.shape;
+                const sectionsOrientation = firstWindow.sectionsOrientation;
 
                 let windingDimensions = [];
                 coil.functionalDescription.forEach((winding, windingIndex) => {
@@ -505,10 +511,23 @@ export default {
 
                 this.$emit("fits", true);
                 try {
-                    const pattern = [];
-                    this.localData.pattern.split('').forEach((char) => {
-                        pattern.push(Number(char) - 1);
-                    });
+                    // The interleaving order is held as ONE CHARACTER PER WINDING (the
+                    // ListOfCharacters widget above binds to it), so it cannot express a
+                    // tenth winding: index 9 is written "10", and reading it a character at
+                    // a time yields TWO entries -- '1' -> 0, a duplicate of winding 1, and
+                    // '0' -> -1. As a size_t in the engine that -1 becomes 2^64-1, a winding
+                    // is left with no section slot, and wind() answers "Number of slots
+                    // cannot be less than 1, please verify your isolation sides requirement".
+                    // That message sends the reader to the isolation sides, which are fine.
+                    //
+                    // Above nine windings the string is genuinely ambiguous ("12345678910"
+                    // could be 1..10 or 1..9,1,0), so there is nothing to recover: fall back
+                    // to the declared winding order, which is what the widget would have
+                    // meant. Nine or fewer keeps reading the user's chosen interleaving.
+                    const windingCount = inputCoil.functionalDescription.length;
+                    const pattern = (windingCount > 9)
+                        ? inputCoil.functionalDescription.map((winding, index) => index)
+                        : this.localData.pattern.split('').map((char) => Number(char) - 1);
 
                     this.taskQueueStore.wind(inputCoil, this.localData.repetitions, this.localData.proportionPerWinding, pattern, margins).then((coil) => {
                         this.taskQueueStore.calculateFillingFactors(coil).then((fillingFactors) => {
@@ -771,11 +790,18 @@ export default {
                 return;
             }
 
-            // Check if thickness actually changed from current bobbin to avoid infinite loop
-            const currentBobbin = this.masStore.mas.magnetic.coil.bobbin;
-            if (currentBobbin && currentBobbin !== "Dummy" && currentBobbin.processedDescription) {
-                const currentWall = currentBobbin.processedDescription.wallThickness;
-                const currentColumn = currentBobbin.processedDescription.columnThickness;
+            // Check if thickness actually changed from current bobbin to avoid infinite loop.
+            //
+            // Read through bobbinProcessed(): for a per-column (Convention A) magnetic
+            // `coil.bobbin` is an ARRAY, which has no processedDescription, so the direct
+            // read returned undefined and this guard FAILED OPEN -- falling through to
+            // regenerate a SINGLE bobbin and silently replacing the per-leg array with a
+            // scalar. That is what collapsed a two-leg design to one winding window a few
+            // seconds after load, which then made every window index 1 out of range.
+            const currentProcessed = bobbinProcessed(this.masStore.mas.magnetic.coil);
+            if (currentProcessed) {
+                const currentWall = currentProcessed.wallThickness;
+                const currentColumn = currentProcessed.columnThickness;
                 const newWall = this.localData.bobbinWallThickness;
                 const newColumn = this.localData.bobbinColumnThickness;
                 
@@ -785,7 +811,35 @@ export default {
             }
 
             this.taskQueueStore.generateBobbinDifferentThicknesses(this.masStore.mas.magnetic.core, this.localData.bobbinWallThickness, this.localData.bobbinColumnThickness).then((bobbin) => {
-                this.masStore.mas.magnetic.coil.bobbin = bobbin;
+                // A per-column (Convention A) coil carries one bobbin per leg and the leg
+                // mapping IS the array position, so assigning the single regenerated bobbin
+                // here would drop the mapping along with the second window, leaving every
+                // section that names window 1 unresolvable.
+                //
+                // Patch the two thickness fields on each element in place rather than
+                // swapping in the regenerated processedDescription wholesale. Two reasons,
+                // and the first one cost a debugging round: a freshly generated description
+                // grafted onto an existing element produced a coil the engine answered
+                // "Could not deserialise!" to. The second is geometry -- the generated
+                // description describes ONE bobbin derived from the core, so its windows
+                // would overwrite the per-leg windows with a single-window guess.
+                //
+                // Window dimensions are deliberately NOT re-derived here. For a single
+                // bobbin the engine does that from the core; for a per-leg set there is no
+                // single answer, and inventing one is worse than leaving the windows as the
+                // author stated them.
+                const entries = bobbinEntries(this.masStore.mas.magnetic.coil);
+                if (entries.length > 1) {
+                    entries.forEach((entry) => {
+                        if (entry?.processedDescription != null) {
+                            entry.processedDescription.wallThickness = this.localData.bobbinWallThickness;
+                            entry.processedDescription.columnThickness = this.localData.bobbinColumnThickness;
+                        }
+                    });
+                }
+                else {
+                    this.masStore.mas.magnetic.coil.bobbin = bobbin;
+                }
                 this.coilUpdated();
             })
             .catch(error => {

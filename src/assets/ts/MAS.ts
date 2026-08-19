@@ -388,13 +388,14 @@ export interface ImpedancePoint {
 /**
  * PCB / terminal connection type. Superset of MAS schemas/utils.json#/$defs/connectionType:
  * includes every MAS value (pin, screw, smt, flyingLead, tht, pcbPad) plus PEAS-only
- * additions (chassis). Case-style aligned to MAS (lowerCamelCase) since MAS is the IEC
- * standard candidate.
+ * additions (chassis, blind). A blind connection is an unexposed splice joining one
+ * winding to another inside the assembly, with no externally accessible terminal.
+ * Case-style aligned to MAS (lowerCamelCase) since MAS is the IEC standard candidate.
  *
  * PCB mounting style. Uses the same connectionType enum as designRequirements.terminalType.
  */
 export enum ConnectionType {
-    Blind = "blind",
+    Blind = "blind", // unexposed splice joining one winding to another; no external terminal
     Chassis = "chassis",
     FlyingLead = "flyingLead",
     PCBPad = "pcbPad",
@@ -1762,6 +1763,12 @@ export interface Group {
      * Type of the group
      */
     type: WiringTechnology;
+    /**
+     * Index of the winding window (in the windingWindows list of the governing bobbin or
+     * core processed description) the sections of this group are placed in. If not present,
+     * the first winding window (index 0) is assumed. Overridable per section
+     */
+    windingWindow?: number;
 }
 
 /**
@@ -1936,6 +1943,13 @@ export interface Section {
      * Defines if the section is wound by consecutive turns or parallels
      */
     windingStyle?: WindingStyle;
+    /**
+     * Index of the winding window (in the windingWindows list of the governing bobbin or
+     * core processed description) this section is placed in. If not present, the group's
+     * windingWindow applies, else the first winding window (index 0). Coordinates stay
+     * referred to the center of the main column regardless of this value
+     */
+    windingWindow?: number;
 }
 
 /**
@@ -4932,6 +4946,7 @@ const typeMap: any = {
         { json: "partialWindings", js: "partialWindings", typ: a(r("PartialWinding")) },
         { json: "sectionsOrientation", js: "sectionsOrientation", typ: r("WindingOrientation") },
         { json: "type", js: "type", typ: r("WiringTechnology") },
+        { json: "windingWindow", js: "windingWindow", typ: u(undefined, 0) },
     ], false),
     "PartialWinding": o([
         { json: "connections", js: "connections", typ: u(undefined, a(r("ConnectionElement"))) },
@@ -4968,6 +4983,7 @@ const typeMap: any = {
         { json: "type", js: "type", typ: r("ElectricalType") },
         { json: "windingOrder", js: "windingOrder", typ: u(undefined, r("WindingOrder")) },
         { json: "windingStyle", js: "windingStyle", typ: u(undefined, r("WindingStyle")) },
+        { json: "windingWindow", js: "windingWindow", typ: u(undefined, 0) },
     ], false),
     "MarginInfo": o([
         { json: "bottomOrRightWidth", js: "bottomOrRightWidth", typ: 3.14 },
@@ -5613,6 +5629,7 @@ const typeMap: any = {
         "space",
     ],
     "ConnectionType": [
+        "blind",
         "chassis",
         "flyingLead",
         "pcbPad",
