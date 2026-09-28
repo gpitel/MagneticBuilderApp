@@ -440,8 +440,8 @@ export default {
 
 <style scoped>
 .wire-config-panel {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.2);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 6%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.25rem 0;
@@ -454,8 +454,8 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.6rem 0.9rem;
-    background: rgba(120, 120, 120, 0.1);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.9rem;
     color: var(--p-primary);
@@ -508,12 +508,12 @@ export default {
     background: linear-gradient(135deg,
         color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
         var(--p-primary) 55%,
-        rgb(var(--p-primary-rgb) / 0.85) 100%);
+        rgba(var(--p-primary-rgb), 0.85) 100%);
     color: var(--p-white);
     border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        0 0 0 1px rgba(var(--p-primary-rgb), 0.35),
+        0 2px 8px rgba(var(--p-primary-rgb), 0.4),
         inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
     text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }

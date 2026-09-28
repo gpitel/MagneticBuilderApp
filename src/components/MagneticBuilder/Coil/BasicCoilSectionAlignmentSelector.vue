@@ -266,8 +266,8 @@ export default {
 
 <style scoped>
 .alignment-panel {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.08) 0%, rgba(120, 120, 120, 0.02) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.2);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 8%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.5rem 0;
@@ -292,8 +292,8 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem 1rem;
-    background: rgba(120, 120, 120, 0.12);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 12%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.92rem;
     color: var(--p-primary);
@@ -328,7 +328,7 @@ export default {
 }
 
 .alignment-close-btn:hover {
-    background: rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     color: var(--p-white);
 }
 

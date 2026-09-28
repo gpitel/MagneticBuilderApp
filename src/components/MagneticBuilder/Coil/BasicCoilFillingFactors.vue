@@ -1,6 +1,6 @@
 <script setup>
 import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.vue'
-import { toTitleCase, checkAndFixMas, deepCopy, range } from '/WebSharedComponents/assets/js/utils.js'
+import { toTitleCase, checkAndFixMas, deepCopy, range, effectiveBobbin } from '/WebSharedComponents/assets/js/utils.js'
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 </script>
 
@@ -31,6 +31,10 @@ export default {
         windingDoesNotFit() {
             const f = this.data?.fillingFactors;
             if (f == null) return false;
+            // ABT #245: the engine reports the verdict as windingFits, leaving
+            // areaFillingFactor free to be the true area fraction.
+            if (f.windingFits != null) return !f.windingFits;
+            // Older embedded engines do not send windingFits — pre-#245 test, same verdict.
             if (f.areaFillingFactor > 1) return true;
             if (this.data.sectionsOrientation == 'contiguous' && f.contiguousFillingFactor > 1) return true;
             if (this.data.sectionsOrientation == 'overlapping' && f.overlappingFillingFactor > 1) return true;
@@ -38,7 +42,7 @@ export default {
         },
         contiguousLabel() {
             try {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].shape == "rectangular") {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].shape == "rectangular") {
                     return "height";
                 }
                 else {
@@ -52,7 +56,7 @@ export default {
         },
         overlappingLabel() {
             try {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].shape == "rectangular") {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].shape == "rectangular") {
                     return "width";
                 }
                 else {
@@ -162,8 +166,8 @@ export default {
 
 <style scoped>
 .filling-panel {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.2);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 6%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);
     border-radius: 14px;
     padding: 0;
     margin: 0.5rem 0 1rem 0;
@@ -176,8 +180,8 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem 1rem;
-    background: rgba(120, 120, 120, 0.1);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.92rem;
     color: var(--p-primary);

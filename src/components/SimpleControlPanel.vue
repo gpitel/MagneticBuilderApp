@@ -296,12 +296,12 @@ export default {
     background: linear-gradient(135deg,
         color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
         var(--p-primary) 55%,
-        rgb(var(--p-primary-rgb) / 0.85) 100%);
+        rgba(var(--p-primary-rgb), 0.85) 100%);
     color: var(--p-white);
     border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        0 0 0 1px rgba(var(--p-primary-rgb), 0.35),
+        0 2px 8px rgba(var(--p-primary-rgb), 0.4),
         inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
     text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
@@ -322,8 +322,8 @@ export default {
 }
 
 .scp-btn-danger {
-    background: rgb(var(--p-danger-rgb) / 0.2);
-    border: 1px solid rgb(var(--p-danger-rgb) / 0.55);
+    background: rgba(var(--p-danger-rgb), 0.2);
+    border: 1px solid rgba(var(--p-danger-rgb), 0.55);
     color: var(--p-danger);
     box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.25);
     min-width: 2.1rem;
@@ -331,7 +331,7 @@ export default {
 }
 
 .scp-btn-danger:hover:not(:disabled) {
-    background: rgb(var(--p-danger-rgb) / 0.3);
-    border-color: rgb(var(--p-danger-rgb) / 0.75);
+    background: rgba(var(--p-danger-rgb), 0.3);
+    border-color: rgba(var(--p-danger-rgb), 0.75);
 }
 </style>

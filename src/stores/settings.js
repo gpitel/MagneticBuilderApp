@@ -47,6 +47,14 @@ export const useSettingsStore = defineStore("settings", () => {
     const operatingPointSettings = ref({
         advancedMode: true,
     })
+    // User preferences that roam with the account profile (ABT #1099):
+    // unit system for display/input of lengths, areas, volumes, temperatures
+    // and weights ("si" | "imperial"), and the manufacturer whose materials
+    // the core adviser searches first (null = engine default).
+    const userPreferences = ref({
+        unitSystem: "si",
+        preferredCoreManufacturer: null,
+    })
 
     function reset() {
         this.adviserSettings ={
@@ -81,6 +89,10 @@ export const useSettingsStore = defineStore("settings", () => {
             advancedMode: true,
             useAllParts: null,
         };
+        this.userPreferences = {
+            unitSystem: "si",
+            preferredCoreManufacturer: null,
+        };
 
 
     }
@@ -93,6 +105,7 @@ export const useSettingsStore = defineStore("settings", () => {
         operatingPointSettings,
 
         catalogAdviserSettings,
+        userPreferences,
 
         reset,
 

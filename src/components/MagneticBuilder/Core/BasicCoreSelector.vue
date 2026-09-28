@@ -5,20 +5,34 @@ import CoreGappingSelector from '/WebSharedComponents/Common/CoreGappingSelector
 import Magnetic3DVisualizer from '/WebSharedComponents/Common/Magnetic3DVisualizer.vue'
 import BasicCoreSubmenu from './BasicCoreSubmenu.vue'
 import { coreAdviserWeights, defaultUngappedGapping } from '/WebSharedComponents/assets/js/defaults.js'
+import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
 import CoreInfo from './CoreInfo.vue'
 import CoreShapeSelector from './CoreShapeSelector.vue'
+import CoreMaterialTableModal, { buildMaterialRow } from './CoreMaterialTableModal.vue'
 import { useHistoryStore } from '../../../stores/history'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 
-import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
+import { deepCopy, formatDimension } from '/WebSharedComponents/assets/js/utils.js'
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 </script>
 
 <script>
+// In the plain block, not <script setup>: methods below call it, and an Options
+// API method cannot see a <script setup> binding.
+import { applyAdvisedCore } from './applyAdvisedCore.js'
 
 export default {
     emits: ['customizeCore', 'gappingUpdated', 'coreProcessed', 'coreProcessingStarted'],
     props: {
+        /**
+         * The panel's own info card. A layout that gives the results a cell of
+         * their own (the bands layout) turns this off and mounts the info
+         * component itself — same component, different place (ABT #1121).
+         */
+        showInfoPanel: {
+            type: Boolean,
+            default: true,
+        },
         dataTestLabel: {
             type: String,
             default: '',
@@ -75,6 +89,13 @@ export default {
         const coreMaterialNames = {};
         const localData = {};
         const onlyManufacturer = null;
+        // Material table (ABT #1072): engine summary rows, resolved once per session.
+        const coreMaterialSummaryRows = null;
+        const coreMaterialTableVisible = false;
+        const shapeTableOpenRequest = 0;
+        const adjustingToInductance = false;
+        const infoMessage = '';
+        const coreMaterialTableLoading = false;
 
         if (this.masStore.coreAdviserWeights == null) {
             this.masStore.coreAdviserWeights = coreAdviserWeights;
@@ -92,6 +113,12 @@ export default {
             historyStore,
             localData,
             onlyManufacturer,
+            coreMaterialSummaryRows,
+            coreMaterialTableVisible,
+            shapeTableOpenRequest,
+            adjustingToInductance,
+            infoMessage,
+            coreMaterialTableLoading,
             coreMaterialManufacturers,
             coreMaterialNames,
             errorMessage,
@@ -106,6 +133,46 @@ export default {
         }
     },
     computed: {
+        /** Required magnetizing inductance (H) from the design requirements, or null. */
+        requiredMagnetizingInductance() {
+            const requirement = this.masStore.mas.inputs?.designRequirements?.magnetizingInductance;
+            if (requirement == null) return null;
+            if (typeof requirement === 'number') return requirement;
+            // PEAS dimensionWithTolerance resolution order: nominal, (min+max)/2, max, min.
+            if (requirement.nominal != null) return requirement.nominal;
+            if (requirement.minimum != null && requirement.maximum != null) return (requirement.minimum + requirement.maximum) / 2;
+            if (requirement.maximum != null) return requirement.maximum;
+            if (requirement.minimum != null) return requirement.minimum;
+            return null;
+        },
+        coreIsComplete() {
+            const functionalDescription = this.masStore.mas.magnetic.core?.functionalDescription;
+            return functionalDescription != null && functionalDescription.shape != '' && functionalDescription.shape != null
+                && functionalDescription.material != '' && functionalDescription.material != null;
+        },
+        primaryTurns() {
+            return this.masStore.mas.magnetic.coil?.functionalDescription?.[0]?.numberTurns ?? 0;
+        },
+        canAdjustGapToInductance() {
+            const type = this.masStore.mas.magnetic.core?.functionalDescription?.type;
+            return this.coreIsComplete && !this.readOnly
+                && (type == 'twoPieceSet' || type == 'pieceAndPlate')
+                && this.primaryTurns > 0
+                && this.requiredMagnetizingInductance != null
+                && this.masStore.mas.inputs?.operatingPoints?.length > 0;
+        },
+        canAdjustTurnsToInductance() {
+            return this.coreIsComplete && !this.readOnly
+                && this.requiredMagnetizingInductance != null
+                && this.masStore.mas.inputs?.operatingPoints?.length > 0;
+        },
+        offerableMaterialRows() {
+            if (this.coreMaterialSummaryRows == null) return [];
+            return this.coreMaterialSummaryRows.filter((row) => {
+                const names = this.coreMaterialNames[row.manufacturer];
+                return names != null && names.includes(row.name);
+            });
+        },
         isCoreIncomplete() {
             // Returns true while shape OR material is missing — used to highlight
             // the "Advise" button in danger color so the user knows it's the
@@ -167,6 +234,16 @@ export default {
 
         this.subscriptions.push(this.taskQueueStore.$onAction(({name, args, after}) => {
             after(() => {
+                // A core the ADVISER produced — from this panel's own button or
+                // from the alternatives map — has to reach these dropdowns, or the
+                // panel keeps showing the shape the user just replaced (ABT #1121).
+                // Only when the advise came from SOMEWHERE ELSE (the alternatives
+                // map): this panel's own Advise assigns the core itself when its
+                // promise resolves, and repeating the work here while that is
+                // still in flight only adds a second reprocess.
+                if (name == "coreAdvised" && args[0] && args[1]?.core != null && !this.loading) {
+                    this.assignLocalData(args[1].core);
+                }
                 if (name == "coreProcessed") {
                     if (args[0]) {
                         const core = args[1];
@@ -341,7 +418,26 @@ export default {
             }
         },
         getMaterialNames() {
-            this.taskQueueStore.getCoreMaterials(this.onlyManufacturer).then((coreMaterialNames) => {
+            // Power/filter designs need core losses, so only offer materials the
+            // engine has a loss model for — a loss-less pick used to end in
+            // MODEL_NOT_AVAILABLE on every loss-dependent step. CMC flows keep the
+            // full list: interference-suppression materials (Vitroperm, R-series,
+            // 1K107, …) are characterised by complex permeability only (ABT #401).
+            const application = this.$stateStore.getCurrentApplication();
+            const requireLossModel =
+                application != this.$stateStore.SupportedApplications.CommonModeChoke &&
+                application != this.$stateStore.SupportedApplications.CommonModeChokeCatalog;
+            this.taskQueueStore.getCoreMaterials(this.onlyManufacturer, requireLossModel).then((coreMaterialNames) => {
+                if (requireLossModel && (this.onlyManufacturer == null || this.onlyManufacturer == '')) {
+                    // Drop manufacturers left with no offerable material (e.g.
+                    // Vacuumschmelze, whose catalog here is Vitroperm-only) so the
+                    // manufacturer dropdown cannot lead to an empty material list.
+                    for (const manufacturer of Object.keys(coreMaterialNames)) {
+                        if (coreMaterialNames[manufacturer].length === 0) {
+                            delete coreMaterialNames[manufacturer];
+                        }
+                    }
+                }
                 this.coreMaterialNames = coreMaterialNames;
                 this.coreMaterialManufacturers = Object.keys(coreMaterialNames);
             })
@@ -382,6 +478,125 @@ export default {
                     console.error(error);
                 });
             }
+        },
+        openShapeTable() {
+            this.shapeTableOpenRequest += 1;
+        },
+        /** Same model selection CoreInfo simulates with, so the result matches what is shown. */
+        inductanceModelsData() {
+            return {
+                coreLosses: this.$userStore.selectedModels['coreLosses'] || Defaults.coreLossesModelDefault,
+                coreTemperature: this.$userStore.selectedModels['coreTemperature'] || Defaults.coreTemperatureModelDefault,
+                gapReluctance: this.$userStore.selectedModels['gapReluctance'] || Defaults.reluctanceModelDefault,
+            };
+        },
+        showInfo(message) {
+            this.infoMessage = message;
+            setTimeout(() => { if (this.infoMessage === message) this.infoMessage = ''; }, 8000);
+        },
+        showError(message) {
+            console.error(message);
+            this.errorMessage = message;
+            setTimeout(() => { if (this.errorMessage === message) this.errorMessage = ''; }, 10000);
+        },
+        /**
+         * Gap for the required magnetizing inductance with the turns as they are.
+         * Keeps the gap kind the core has (spacer if any additive gap, else ground).
+         *
+         * The engine solves the gap under the DC bias of the first operating
+         * point on the material's magnetisation curve (ABT #1093); a bias the
+         * material cannot carry is refused with its message, shown as the error.
+         */
+        async adjustGapToInductance() {
+            if (!this.canAdjustGapToInductance || this.adjustingToInductance) return;
+            this.adjustingToInductance = true;
+            this.changeMadeByUser = true;
+            try {
+                const core = deepCopy(this.masStore.mas.magnetic.core);
+                const gappingType = (core.functionalDescription.gapping || []).some((gap) => gap.type == 'additive') ? 'Spacer' : 'Ground';
+                const biased = (this.masStore.mas.inputs.operatingPoints?.length ?? 0) > 0;
+                const gappedCore = await this.taskQueueStore.calculateGappingFromNumberTurnsAndInductance(
+                    core, this.masStore.mas.magnetic.coil, deepCopy(this.masStore.mas.inputs), gappingType, 6, this.inductanceModelsData());
+                this.masStore.mas.magnetic.core.functionalDescription.gapping = gappedCore.functionalDescription.gapping;
+                this.$emit('gappingUpdated');
+                this.$emit('coreProcessingStarted');
+                const processedCore = await this.taskQueueStore.processCore(this.masStore.mas.magnetic.core);
+                this.masStore.mas.magnetic.core = processedCore;
+                this.localData['gapping'] = deepCopy(processedCore.functionalDescription.gapping);
+                this.updatingLocalData = true;
+                this.forceUpdate += 1;
+                this.$nextTick(() => { this.updatingLocalData = false; });
+                this.$emit('coreProcessed');
+                const longest = Math.max(...processedCore.functionalDescription.gapping.map((gap) => gap.length));
+                const shown = formatDimension(longest);
+                this.showInfo(`Gap set to ${shown.label} ${shown.unit} (${gappingType.toLowerCase()}) for ${this.primaryTurns} turns and ${(this.requiredMagnetizingInductance * 1e6).toPrecision(3)} µH${biased ? ' at the first operating point' : ' small-signal'}`);
+            }
+            catch (error) {
+                this.showError('Could not find a gap for the required inductance: ' + error.message);
+            }
+            finally {
+                this.adjustingToInductance = false;
+            }
+        },
+        /**
+         * Turns for the required magnetizing inductance with the gap as it is.
+         * The primary comes from the engine; the other windings follow the
+         * design's turns ratios, as after Advise.
+         */
+        async adjustTurnsToInductance() {
+            if (!this.canAdjustTurnsToInductance || this.adjustingToInductance) return;
+            this.adjustingToInductance = true;
+            this.changeMadeByUser = true;
+            try {
+                const primaryTurns = await this.taskQueueStore.calculateNumberTurnsFromGappingAndInductance(
+                    this.masStore.mas.magnetic.core, this.masStore.mas.magnetic.coil, this.masStore.mas.inputs, this.inductanceModelsData());
+                const numberTurns = await this.taskQueueStore.calculateNumberTurns(primaryTurns, this.masStore.mas.inputs.designRequirements);
+                const windings = this.masStore.mas.magnetic.coil.functionalDescription;
+                for (let i = 0; i < numberTurns.length && i < windings.length; i++) {
+                    windings[i].numberTurns = numberTurns[i];
+                }
+                // The wound description is stale now; the coil rewinds on numberTurnsUpdated.
+                this.masStore.mas.magnetic.coil.turnsDescription = null;
+                this.masStore.mas.magnetic.coil.layersDescription = null;
+                this.masStore.mas.magnetic.coil.sectionsDescription = null;
+                this.taskQueueStore.numberTurnsUpdated(true);
+                this.showInfo(`Turns set to ${numberTurns.join(' : ')} for ${(this.requiredMagnetizingInductance * 1e6).toPrecision(3)} µH with the current gap`);
+            }
+            catch (error) {
+                this.showError('Could not find a number of turns for the required inductance: ' + error.message);
+            }
+            finally {
+                this.adjustingToInductance = false;
+            }
+        },
+        /**
+         * Material table (ABT #1072): every offerable material with its
+         * properties resolved by the engine. "Offerable" is the same list the
+         * dropdowns use (loss-model requirement, manufacturer restriction).
+         */
+        async openMaterialTable() {
+            this.coreMaterialTableVisible = true;
+            if (this.coreMaterialSummaryRows == null) {
+                this.coreMaterialTableLoading = true;
+                try {
+                    const summary = await this.taskQueueStore.getCoreMaterialsSummary();
+                    this.coreMaterialSummaryRows = summary.map((row) => buildMaterialRow(row));
+                }
+                finally {
+                    this.coreMaterialTableLoading = false;
+                }
+            }
+        },
+        coreMaterialSelected(row) {
+            this.localData.materialManufacturer = row.manufacturer;
+            this.localData.material = row.name;
+            if (this.localData.shape == '' || this.localData.shape == null) {
+                // No shape yet: keep the choice; shapeUpdated() completes the core
+                // through checkAndFixMas once a shape is picked.
+                this.masStore.mas.magnetic.core.functionalDescription.material = row.name;
+                return;
+            }
+            this.materialUpdated(row.name);
         },
         materialUpdated(value) {
             this.changeMadeByUser = true;
@@ -478,36 +693,21 @@ export default {
                 };
 
                 this.taskQueueStore.adviseCore(this.masStore.mas.inputs, this.masStore.coreAdviserWeights, settings).then(async (magnetic) => {
-                    this.masStore.mas.magnetic.core = magnetic.core;
-                    
-                    // Generate bobbin first
-                    const bobbin = await this.taskQueueStore.generateBobbinFromCoreShape(magnetic.core, this.masStore.mas.inputs.designRequirements.wiringTechnology);
-                    
-                    // Then calculate turns
-                    const numberTurns = await this.taskQueueStore.calculateNumberTurns(magnetic.coil.functionalDescription[0].numberTurns, this.masStore.mas.inputs.designRequirements);
-                    
-                    // Update windings with calculated turns
-                    const windings = this.masStore.mas.magnetic.coil.functionalDescription;
-                    for (let i = 0; i < numberTurns.length; i++) {
-                        windings[i].numberTurns = numberTurns[i];
-                    }
-                    
-                    // Assign everything atomically: first coil data, then bobbin last
-                    this.masStore.mas.magnetic.coil.turnsDescription = null;
-                    this.masStore.mas.magnetic.coil.layersDescription = null;
-                    this.masStore.mas.magnetic.coil.sectionsDescription = null;
-                    this.masStore.mas.magnetic.coil.functionalDescription = windings;
-                    this.masStore.mas.magnetic.coil.bobbin = bobbin;
-                    
-                    setTimeout(() => {this.historyStore.addToHistory(this.masStore.mas);}, 1000);
-
-                    this.errorMessage = "";
-                    this.assignLocalData(magnetic.core);
-                    this.loading = false;
+                    // ABT #790: a zero-candidate advise RESOLVES with an empty
+                    // magnetic (shape ""), and assigning it left the panel on
+                    // "Select a core first" with no explanation — the button
+                    // just looked dead. applyAdvisedCore throws on that, which
+                    // the catch below turns into the visible message.
+                    await this.applyAdvisedCore(magnetic);
                     this.$emit('coreProcessed', true, magnetic.core);
                 })
                 .catch(error => {
-                    this.errorMessage = "No core can be advised. You are on your own."
+                    // A zero-candidate advise and a failed advise read differently
+                    // to the user: one is "relax the requirements", the other is
+                    // "something broke".
+                    this.errorMessage = /no candidate/i.test(error?.message ?? '')
+                        ? "No core can be advised for these requirements. Try another core-advise mode in Settings, or relax the requirements."
+                        : "No core can be advised. You are on your own.";
                     this.loading = false;
                     this.$emit('coreProcessed', false, error);
                     setTimeout(() => {this.errorMessage = ""}, 10000);
@@ -517,6 +717,22 @@ export default {
                 this.loading = false;
             }
         },
+        /**
+         * Adopt an advised core: shared with the alternatives panel, so a core
+         * picked from the chart lands in the design exactly as the Advise
+         * button's does (bobbin, turns, history). See applyAdvisedCore.js.
+         */
+        async applyAdvisedCore(magnetic) {
+            await applyAdvisedCore({
+                masStore: this.masStore,
+                taskQueueStore: this.taskQueueStore,
+                historyStore: this.historyStore,
+                magnetic,
+            });
+            this.errorMessage = "";
+            this.assignLocalData(magnetic.core);
+            this.loading = false;
+        },
         loadCore() {
         },
     }
@@ -525,6 +741,13 @@ export default {
 
 <template>
     <div class="container">
+        <CoreMaterialTableModal
+            v-model:visible="coreMaterialTableVisible"
+            :dataTestLabel="dataTestLabel + '-AdvancedCoreInfo'"
+            :coreMaterialData="offerableMaterialRows"
+            :loading="coreMaterialTableLoading"
+            @coreMaterialSelected="coreMaterialSelected"
+        />
         <div
             class="core-config-panel"
             :style="{ '--core-config-value-font-size': $styleStore.magneticBuilder.inputFontSize?.['font-size'] ?? $styleStore.magneticBuilder.inputFontSize?.fontSize }"
@@ -534,8 +757,30 @@ export default {
                     <i class="pi pi-box"></i>
                     <span>Core Configuration</span>
                 </div>
-                <div v-if="enableAdvise && enableSubmenu && !readOnly" class="core-config-header-right">
+                <div v-if="!readOnly" class="core-config-header-right">
                     <button
+                        type="button"
+                        :data-cy="dataTestLabel + '-Core-ShapeTable-button'"
+                        class="core-config-header-btn core-config-header-btn-secondary"
+                        v-tooltip="'Browse every core shape in a table: filter and order by size, effective area, window area…'"
+                        @click="openShapeTable"
+                    >
+                        <i class="pi pi-table"></i>
+                        <span>Shapes</span>
+                    </button>
+                    <button
+                        type="button"
+                        :data-cy="dataTestLabel + '-Core-MaterialTable-button'"
+                        class="core-config-header-btn core-config-header-btn-secondary"
+                        :disabled="coreMaterialManufacturers.length === 0"
+                        v-tooltip="'Browse every core material in a table: filter and order by permeability, saturation, losses…'"
+                        @click="openMaterialTable"
+                    >
+                        <i class="pi pi-table"></i>
+                        <span>Materials</span>
+                    </button>
+                    <button
+                        v-if="enableAdvise && enableSubmenu"
                         type="button"
                         :disabled="loading"
                         :data-cy="dataTestLabel + '-Core-Advise-button'"
@@ -571,6 +816,7 @@ export default {
                 <div class="core-config-grid">
                     <div class="core-config-cell core-config-cell-wide">
                         <CoreShapeSelector
+                            :openTableRequest="shapeTableOpenRequest"
                             :dataTestLabel="dataTestLabel + '-AdvancedCoreInfo'"
                             :readOnly="readOnly"
                             :masStore="masStore"
@@ -666,7 +912,7 @@ export default {
                 </div>
 
                 <CoreInfo 
-                    v-if="!loading && enableSimulation"
+                    v-if="showInfoPanel && !loading && enableSimulation"
                     ref="coreInfo"
                     :dataTestLabel="dataTestLabel + '-CoreInfo'"
                     :advancedMode="$settingsStore.magneticBuilderSettings.advancedMode"
@@ -681,9 +927,15 @@ export default {
                     :dataTestLabel="dataTestLabel + '-BasicCoreSubmenu'"
                     :masStore="masStore"
                     :enableCustomize="enableCustomize"
+                    :allowGapAdjust="canAdjustGapToInductance"
+                    :allowTurnsAdjust="canAdjustTurnsToInductance"
+                    :busy="adjustingToInductance"
                     @customizeCore="$emit('customizeCore')"
                     @loadCore="loadCore"
+                    @adjustGapToInductance="adjustGapToInductance"
+                    @adjustTurnsToInductance="adjustTurnsToInductance"
                 />
+                <label v-if="infoMessage" :data-cy="dataTestLabel + '-Core-adjust-info'" class="text-success col-12 pt-1" style="font-size: 0.7em">{{infoMessage}}</label>
                 <label class="text-danger col-12 pt-1" style="font-size: 0.7em">{{errorMessage}}</label>
             </div>
         </div>
@@ -692,8 +944,8 @@ export default {
 
 <style scoped>
 .core-config-panel {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.2);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 6%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.25rem 0;
@@ -705,9 +957,14 @@ export default {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    /* Three header buttons (Shapes / Materials / Advise, ABT #1072) do not fit
+     * beside the title in a narrow column: let them wrap under it instead of
+     * squeezing the title onto two lines. */
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
     padding: 0.6rem 0.9rem;
-    background: rgba(120, 120, 120, 0.1);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.9rem;
     color: var(--p-primary);
@@ -718,6 +975,14 @@ export default {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.core-config-header-left span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .core-config-header-left i {
@@ -729,6 +994,11 @@ export default {
     display: flex;
     align-items: center;
     gap: 0.35rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 0.3rem;
+    min-width: 0;
+    margin-left: auto;
 }
 
 .core-config-header-btn {
@@ -756,16 +1026,26 @@ export default {
     transform: translateY(-1px);
 }
 
+.core-config-header-btn-secondary {
+    background: transparent;
+    color: var(--p-primary);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.45);
+}
+
+.core-config-header-btn-secondary:not(:disabled):hover {
+    background: rgba(var(--p-primary-rgb), 0.12);
+}
+
 .core-config-header-btn-primary {
     background: linear-gradient(135deg,
         color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
         var(--p-primary) 55%,
-        rgb(var(--p-primary-rgb) / 0.85) 100%);
+        rgba(var(--p-primary-rgb), 0.85) 100%);
     color: var(--p-white);
     border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        0 0 0 1px rgba(var(--p-primary-rgb), 0.35),
+        0 2px 8px rgba(var(--p-primary-rgb), 0.4),
         inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
     text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
@@ -774,11 +1054,11 @@ export default {
    so the user is reminded they can use it to get a starting selection. */
 .core-config-header-btn.core-config-header-btn-needs-attention {
     color: var(--p-danger) !important;
-    border-color: rgb(var(--p-danger-rgb) / 0.6) !important;
+    border-color: rgba(var(--p-danger-rgb), 0.6) !important;
     text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.35);
     box-shadow:
-        0 0 0 1px rgb(var(--p-danger-rgb) / 0.4),
-        0 2px 10px rgb(var(--p-danger-rgb) / 0.4),
+        0 0 0 1px rgba(var(--p-danger-rgb), 0.4),
+        0 2px 10px rgba(var(--p-danger-rgb), 0.4),
         inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
     animation: core-advise-pulse 1.8s ease-in-out infinite;
 }
@@ -836,24 +1116,21 @@ export default {
     padding-right: 0 !important;
 }
 
-/* Core Shape row: dropdown + table-icon button act as ONE element
- * aligned left and right with the Shape Family dropdown above.
- * - Dropdown's left edge = Shape Family dropdown's left edge (via the
- *   inner ElementFromList's col-5 label + col-7 select split)
- * - Button right edge = Shape Family dropdown's right edge (the button
- *   is pinned with `right: 12px` to compensate for the row gutter that
- *   insets the other selects from the cell's right edge)
- * - Dropdown is shrunk by 3rem so it doesn't overlap the 28px button
- *   and there's a visible gap between them. */
+/* Core Shape row: its ElementFromList is nested one level deeper than the
+ * Family / Manufacturer / Material ones (inside .core-shape-input-group), so
+ * the `.row.g-0 > [class*="col-"]` gutter reset above does not reach it. Zero
+ * its own col gutter too, so the dropdown's right edge lines up with the rest. */
 .core-config-cell :deep(.core-shape-input-group) {
     position: relative !important;
     display: block;
 }
-/* Reserve room on the right for the table button (the p-select fills the rest
- * via flex:1, so constrain the row, not the select). */
+.core-config-cell :deep(.core-shape-input-group > .efl-container) {
+    padding-right: 0 !important;
+}
+/* The shape row spans the full value column like Family / Manufacturer /
+ * Material (the table button moved to the header, ABT #1072). */
 .core-config-cell :deep(.core-shape-input-group .core-shape-row) {
     width: 100%;
-    padding-right: 2.25rem;
     box-sizing: border-box;
 }
 .core-config-cell :deep(.core-shape-input-group .core-shape-row .p-select) {
@@ -867,14 +1144,6 @@ export default {
     width: 100% !important;
     max-width: 100% !important;
     margin-right: 0 !important;
-}
-/* Table button pinned to the right edge — aligns with the Manufacturer /
- * Material dropdowns' right edge. */
-.core-config-cell :deep(.core-shape-table-btn-wrapper) {
-    position: absolute !important;
-    right: 0 !important;
-    top: 50%;
-    transform: translateY(-50%) !important;
 }
 
 /* Align all labels (Shape Family / Shape / Manufacturer / Material /

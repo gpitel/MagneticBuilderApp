@@ -9,7 +9,13 @@ import { useTaskQueueStore } from '../../../stores/taskQueue'
 
 <script>
 export default {
+    emits: ['wireUpdated', 'turnsUpdated', 'windingIndexChanged'],
     props: {
+        /** Passed through: a layout may place the wire's numbers elsewhere. */
+        showInfoPanel: {
+            type: Boolean,
+            default: true,
+        },
         dataTestLabel: {
             type: String,
             default: '',
@@ -224,6 +230,9 @@ export default {
         },
         windingIndexChanged(windingIndex) {
             this.selectedWindingIndex = windingIndex;
+            // A layout that shows the wire's numbers in a cell of its own needs
+            // to follow the winding the panel is on (ABT #1121).
+            this.$emit('windingIndexChanged', windingIndex);
             this.taskQueueStore.setWindingIndexChangeBlock();
         },
         onPlotCurrentChange(event) {
@@ -270,6 +279,7 @@ export default {
                     :enableSubmenu="enableSubmenu"
                     :enableAdvise="enableAdvise"
                     :useVisualizers="useVisualizers"
+                    :showInfoPanel="showInfoPanel"
                     :imageUpToDate="imageUpToDate"
                     :forceUpdateVisualizer="forceUpdate"
                     @wireUpdated="wireUpdated"
@@ -287,6 +297,7 @@ export default {
                     :enableSubmenu="enableSubmenu"
                     :enableAdvise="enableAdvise"
                     :useVisualizers="useVisualizers"
+                    :showInfoPanel="showInfoPanel"
                     :imageUpToDate="imageUpToDate"
                     :forceUpdateVisualizer="forceUpdate"
                     @wireUpdated="wireUpdated"

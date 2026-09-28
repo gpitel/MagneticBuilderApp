@@ -8,9 +8,13 @@ import BasicCoilFillingFactors from './BasicCoilFillingFactors.vue'
 import BasicCoilSectionInsulationSelector from './BasicCoilSectionInsulationSelector.vue'
 import BasicCoilSectionAlignmentSelector from './BasicCoilSectionAlignmentSelector.vue'
 import Magnetic2DVisualizer from '/WebSharedComponents/Common/Magnetic2DVisualizer.vue'
-import { toTitleCase, checkAndFixMas, deepCopy, roundWithDecimals, cleanCoil, generateHash } from '/WebSharedComponents/assets/js/utils.js'
+import WindingStudio from '../WindingStudio/WindingStudio.vue'
+import { wiresEqual } from '../WindingStudio/geometry.js'
+import { toTitleCase, checkAndFixMas, deepCopy, roundWithDecimals, cleanCoil, generateHash, effectiveBobbin } from '/WebSharedComponents/assets/js/utils.js'
 import { useHistoryStore } from '../../../stores/history'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
+import { useMagneticBuilderSettingsStore } from '../../../stores/magneticBuilderSettings'
+import { useWindingStudioStore } from '../../../stores/windingStudio'
 
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 </script>
@@ -18,8 +22,17 @@ import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js
 <script>
 
 export default {
-    emits: ['fits', 'plotModeChange', 'swapIncludeFringing', 'errorInImage'],
+    emits: ['fits', 'plotModeChange', 'swapIncludeFringing', 'errorInImage', 'fillingFactorsChanged'],
     props: {
+        /**
+         * The panel's own info card. A layout that gives the results a cell of
+         * their own (the bands layout) turns this off and mounts the info
+         * component itself — same component, different place (ABT #1121).
+         */
+        showInfoPanel: {
+            type: Boolean,
+            default: true,
+        },
         dataTestLabel: {
             type: String,
             default: '',
@@ -72,10 +85,13 @@ export default {
     data() {
         const historyStore = useHistoryStore();
         const taskQueueStore = useTaskQueueStore();
+        const magneticBuilderSettingsStore = useMagneticBuilderSettingsStore();
+        const windingStudioStore = useWindingStudioStore();
         const showAlignmentOptions = false;
 
         const showInsulationOptions = false;
         const loading = false;
+        const placingWinding = false;
         const blockingRebounds = false;
         const recentChange = false;
         const tryingToSend = false;
@@ -142,18 +158,24 @@ export default {
             blockingRebounds,
             taskQueueStore,
             historyStore,
+            magneticBuilderSettingsStore,
+            windingStudioStore,
             localData,
             forceUpdate,
             showAlignmentOptions,
             showInsulationOptions,
             loading,
+            placingWinding,
             recentChange,
             tryingToSend,
             oldMagneticCoilHash,
             oldInputsCoilHash,
             subscriptions,
+            fieldOverlaySvg: null,
             _windTimer: null,
             _reboundsTimer: null,
+            _fieldOverlayInFlight: false,
+            _studioGestureKey: null,
         }
     },
     computed: {
@@ -186,7 +208,7 @@ export default {
         },
         contiguousLabel() {
             try {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].shape == "rectangular") {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].shape == "rectangular") {
                     return "height";
                 }
                 else {
@@ -199,7 +221,7 @@ export default {
         },
         overlappingLabel() {
             try {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].shape == "rectangular") {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].shape == "rectangular") {
                     return "width";
                 }
                 else {
@@ -209,6 +231,16 @@ export default {
             catch (e) {
                 return "width"
             }
+        },
+        coreShapeIdentity() {
+            const shape = this.masStore.mas.magnetic.core?.functionalDescription?.shape;
+            if (shape == null) {
+                return "";
+            }
+            if (typeof shape === "string") {
+                return shape;
+            }
+            return `${shape.family ?? ""}|${shape.name ?? ""}`;
         },
         shortenedNames() {
             const shortenedNames = {}
@@ -240,6 +272,31 @@ export default {
         },
     },
     watch: {
+        coreShapeIdentity(newIdentity, oldIdentity) {
+            // A pinned studio rectangle is absolute winding-window geometry, so a
+            // core shape change invalidates it — re-imposing a rect drawn on the
+            // old window mangles the coil (a cartesian-meters rect applied to a
+            // toroid's polar section shrank it to 0.005deg and silently dropped
+            // 38 of 42 turns). Drop the pins and their rect-derived margins.
+            if (oldIdentity === "" || newIdentity === oldIdentity) {
+                return;
+            }
+            if (this.windingStudioStore.customSectionCount === 0) {
+                return;
+            }
+            for (const sectionName of Object.keys(this.windingStudioStore.customSectionRects)) {
+                const sectionIndex = this.conductiveSections.findIndex((candidate) => candidate.name === sectionName);
+                if (sectionIndex >= 0 && this.localData.dataPerSection[sectionIndex] != null) {
+                    this.localData.dataPerSection[sectionIndex].topOrLeftMargin = 0;
+                    this.localData.dataPerSection[sectionIndex].bottomOrRightMargin = 0;
+                }
+            }
+            this.windingStudioStore.clearCustomSectionRects();
+            // The shape-change flow re-winds on its own (bobbin regeneration);
+            // invalidating the hash makes sure that wind isn't no-op'd away.
+            this.oldMagneticCoilHash = null;
+            this.oldInputsCoilHash = null;
+        },
     },
     mounted () {
         if (this.$stateStore.loadingDesign) {
@@ -380,8 +437,9 @@ export default {
         },
         getProportionsAndPattern(coil) {
             if (coil.sectionsDescription != null) {
-                const bobbinShape = coil.bobbin.processedDescription.windingWindows[0].shape;
-                const sectionsOrientation = coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation;
+                const proportionsBobbin = effectiveBobbin(coil.bobbin);
+                const bobbinShape = proportionsBobbin.processedDescription.windingWindows[0].shape;
+                const sectionsOrientation = proportionsBobbin.processedDescription.windingWindows[0].sectionsOrientation;
 
                 let windingDimensions = [];
                 coil.functionalDescription.forEach((winding, windingIndex) => {
@@ -437,7 +495,644 @@ export default {
                 windingDimensions.forEach((elem) => {
                     this.localData.proportionPerWinding.push(roundWithDecimals(elem / windingDimensionsTotal, 0.01));
                 })
+                // A winding whose derived proportion rounds to 0 (degenerate or
+                // corrupt sectionsDescription, e.g. a 0.005deg toroidal section)
+                // can never hold its turns: the wind throws "Turns not created"
+                // and the coil panel dies. Fall back to equal proportions so the
+                // coil re-winds from the functional description instead.
+                if (this.localData.proportionPerWinding.some((proportion) => !(proportion > 0))) {
+                    this.resetProportionPerWinding(this.localData);
+                }
             }
+        },
+        resizeProportionsFromStudio(proportions) {
+            // Winding-studio boundary drag: the studio re-derived the per-winding
+            // proportions from the resized section widths; re-wind with them (the
+            // winder recomputes the real geometry and enforces the true limits).
+            if (this.readOnly || proportions.length !== this.localData.proportionPerWinding.length) {
+                return;
+            }
+            this.localData.proportionPerWinding = proportions.map((value) => roundWithDecimals(value, 0.01));
+            // The wind() no-op hash covers the coil + margins but NOT the
+            // proportions; reset it so the proportion-only change re-winds.
+            this._studioGestureKey = 'studio:proportions';
+            this.oldMagneticCoilHash = null;
+            this.oldInputsCoilHash = null;
+            this.recentChange = true;
+            this.tryToWind();
+        },
+        clearCustomLayoutFromStudio() {
+            if (this.readOnly) {
+                return;
+            }
+            // The margins derived from the drawn rectangles' wall gaps are part
+            // of the custom layout: reset them for the pinned sections so the
+            // automatic placement really comes back.
+            for (const sectionName of Object.keys(this.windingStudioStore.customSectionRects)) {
+                const sectionIndex = this.conductiveSections.findIndex((candidate) => candidate.name === sectionName);
+                if (sectionIndex >= 0 && this.localData.dataPerSection[sectionIndex] != null) {
+                    this.localData.dataPerSection[sectionIndex].topOrLeftMargin = 0;
+                    this.localData.dataPerSection[sectionIndex].bottomOrRightMargin = 0;
+                }
+            }
+            this.windingStudioStore.clearCustomSectionRects();
+            this.recentChange = true;
+            this.tryToWind();
+        },
+        setCompactFromStudio(enabled) {
+            if (this.readOnly) {
+                return;
+            }
+            this.windingStudioStore.compactEnabled = enabled;
+            this.recentChange = true;
+            this.tryToWind();
+        },
+        resizeMarginsFromStudio({ sectionName, side, value }) {
+            // Winding-studio edge drag: the section edge's distance to the window
+            // wall IS the margin — same knob the Insulation panel edits. Margins
+            // ride the wind call (and its no-op hash), so tryToWind re-winds.
+            if (this.readOnly) {
+                return;
+            }
+            const sectionIndex = this.conductiveSections.findIndex((section) => section.name === sectionName);
+            if (sectionIndex < 0 || this.localData.dataPerSection[sectionIndex] == null) {
+                return;
+            }
+            if (side === 'topOrLeft') {
+                this.localData.dataPerSection[sectionIndex].topOrLeftMargin = value;
+            }
+            else {
+                this.localData.dataPerSection[sectionIndex].bottomOrRightMargin = value;
+            }
+            this._studioGestureKey = `studio:margin:${sectionName}:${side}`;
+            this.recentChange = true;
+            this.tryToWind();
+        },
+        interleaveFromStudio({ source, target, mode }) {
+            // Winding-studio chip-on-winding drop: {interleave, swap, clear}
+            // drive the SAME pattern/repetitions knobs the Alignment panel edits
+            // (PI Expert's gesture). The winder recomputes the real sections.
+            if (this.readOnly) {
+                return;
+            }
+            const windings = this.masStore.mas.magnetic.coil.functionalDescription;
+            const names = windings.map((winding) => winding.name);
+            const sourceIndex = names.indexOf(source);
+            const targetIndex = names.indexOf(target);
+            if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) {
+                return;
+            }
+            if (mode === 'group' || mode === 'ungroup') {
+                // N-filar grouping (bifilar/multifilar): windings marked as
+                // wound together share sections and layers. MAS convention is
+                // MUTUAL — every member's woundWith lists the other members
+                // (same as the wizards' coil groups).
+                if (mode === 'group') {
+                    // Mirror the engine's loud constraints (same parallels and
+                    // wire) so an invalid group never lands in the MAS. The
+                    // isolation side is NOT a constraint: wound-together
+                    // windings have no barrier between them, so their sides
+                    // JOIN (unified to the senior member's side below).
+                    const sourceWinding = windings[sourceIndex];
+                    const targetWinding = windings[targetIndex];
+                    if (sourceWinding.numberParallels !== targetWinding.numberParallels
+                        || !wiresEqual(sourceWinding.wire, targetWinding.wire)) {
+                        console.error(`[WindingStudio] Cannot wind '${source}' together with '${target}': the engine requires the same number of parallels and wire on every grouped winding.`);
+                        return;
+                    }
+                    const members = new Set([
+                        source, target,
+                        ...(windings[sourceIndex].woundWith ?? []),
+                        ...(windings[targetIndex].woundWith ?? []),
+                    ]);
+                    const seniorSide = windings.find((winding) => members.has(winding.name)).isolationSide;
+                    for (const winding of windings) {
+                        if (members.has(winding.name)) {
+                            winding.woundWith = [...members].filter((name) => name !== winding.name);
+                            winding.isolationSide = seniorSide;
+                        }
+                    }
+                }
+                else {
+                    for (const winding of windings) {
+                        if (winding.name === source) {
+                            delete winding.woundWith;
+                        }
+                        else if (winding.woundWith != null) {
+                            winding.woundWith = winding.woundWith.filter((name) => name !== source);
+                            if (winding.woundWith.length === 0) {
+                                delete winding.woundWith;
+                            }
+                        }
+                    }
+                }
+                this.oldMagneticCoilHash = null;
+                this.oldInputsCoilHash = null;
+                this.recentChange = true;
+                this.tryToWind();
+                return;
+            }
+            const naturalOrder = names.map((name, index) => String(index + 1));
+            // Base order: unique digits of the current pattern; a stale/partial
+            // pattern falls back to the natural order.
+            let order = [...new Set((this.localData.pattern || '').split(''))]
+                .filter((digit) => naturalOrder.includes(digit));
+            if (order.length !== names.length) {
+                order = [...naturalOrder];
+            }
+            const sourceDigit = String(sourceIndex + 1);
+            const targetDigit = String(targetIndex + 1);
+            if (mode === 'clear') {
+                this.localData.pattern = naturalOrder.join('');
+                this.localData.repetitions = 1;
+            }
+            else if (mode === 'swap') {
+                const sourcePosition = order.indexOf(sourceDigit);
+                const targetPosition = order.indexOf(targetDigit);
+                [order[sourcePosition], order[targetPosition]] = [order[targetPosition], order[sourcePosition]];
+                this.localData.pattern = order.join('');
+            }
+            else if (mode === 'interleave') {
+                // Adjacency + one more repetition: P S at reps 2 is the classic
+                // P S P S sandwich. Capped by the smallest turn count (a section
+                // needs at least one turn) and a practical ceiling of 8.
+                order = order.filter((digit) => digit !== sourceDigit);
+                order.splice(order.indexOf(targetDigit) + 1, 0, sourceDigit);
+                this.localData.pattern = order.join('');
+                const minTurns = Math.min(...windings.map((winding) => winding.numberTurns ?? 1));
+                const repetitionsCap = Math.max(1, Math.min(8, minTurns));
+                this.localData.repetitions = Math.min(repetitionsCap, (this.localData.repetitions ?? 1) + 1);
+            }
+            else {
+                return;
+            }
+            // Pattern/repetitions ride the wind call as args, not the coil hash;
+            // reset it so the change definitely re-winds.
+            this.oldMagneticCoilHash = null;
+            this.oldInputsCoilHash = null;
+            this.recentChange = true;
+            this.tryToWind();
+        },
+        async requestFieldOverlayFromStudio() {
+            // Winding-studio field toggle: the painter's H-field SVG rendered as
+            // a background layer. Needs a wound coil and an operating point.
+            const magnetic = this.masStore.mas.magnetic;
+            const operatingPoint = this.masStore.mas.inputs?.operatingPoints?.[this.operatingPointIndex ?? 0];
+            if (magnetic?.coil?.turnsDescription == null || operatingPoint == null) {
+                this.fieldOverlaySvg = null;
+                return;
+            }
+            if (this._fieldOverlayInFlight) {
+                return;
+            }
+            this._fieldOverlayInFlight = true;
+            try {
+                this.fieldOverlaySvg = await this.taskQueueStore.plotMagneticField(magnetic, operatingPoint);
+            }
+            catch (error) {
+                this.fieldOverlaySvg = null;
+                console.error(error);
+            }
+            finally {
+                this._fieldOverlayInFlight = false;
+            }
+        },
+        setSectionLayoutFromStudio({ sectionName, turnsAlignment, layersOrientation, windingName = null, windingStyle = null }) {
+            // Winding-studio per-section gear: the SAME dataPerSection knobs the
+            // Alignment panel edits per conduction section; they ride the wind
+            // call as the per-section _turnsAlignment/_layersOrientation maps.
+            // The parallels style is a WINDING-level override riding _windingStyle.
+            if (this.readOnly) {
+                return;
+            }
+            const sectionIndex = this.conductiveSections.findIndex((section) => section.name === sectionName);
+            if (sectionIndex < 0 || this.localData.dataPerSection[sectionIndex] == null) {
+                console.error(`[WindingStudio] No section '${sectionName}' to set the layout on`);
+                return;
+            }
+            this.localData.dataPerSection[sectionIndex].turnsAlignment = turnsAlignment;
+            this.localData.dataPerSection[sectionIndex].layersOrientation = layersOrientation;
+            if (windingName != null) {
+                this.windingStudioStore.setWindingStyleOverride(windingName, windingStyle);
+            }
+            this._studioGestureKey = `studio:section-layout:${sectionName}`;
+            this.oldMagneticCoilHash = null;
+            this.oldInputsCoilHash = null;
+            this.recentChange = true;
+            this.tryToWind();
+        },
+        setWindingGroupsFromStudio(groups) {
+            // Winding-studio groups editor: the partition of windings into
+            // wound-together (bifilar) groups, written as MUTUAL woundWith
+            // lists (wizard convention). The engine constraints are re-checked
+            // defensively — an invalid group must never land in the MAS.
+            if (this.readOnly) {
+                return;
+            }
+            const windings = this.masStore.mas.magnetic.coil.functionalDescription;
+            for (const group of groups) {
+                const members = group.map((name) => windings.find((winding) => winding.name === name));
+                if (members.some((member) => member == null)) {
+                    console.error(`[WindingStudio] Unknown winding in group [${group.join(', ')}]`);
+                    return;
+                }
+                const first = members[0];
+                for (const member of members.slice(1)) {
+                    if (member.numberParallels !== first.numberParallels
+                        || !wiresEqual(member.wire, first.wire)) {
+                        console.error(`[WindingStudio] Cannot wind [${group.join(', ')}] together: the engine requires the same number of parallels and wire on every grouped winding.`);
+                        return;
+                    }
+                }
+            }
+            for (const winding of windings) {
+                const group = groups.find((candidate) => candidate.includes(winding.name));
+                if (group != null) {
+                    winding.woundWith = group.filter((name) => name !== winding.name);
+                    // No barrier between wound-together windings: their
+                    // isolation sides JOIN, unified to the senior (first
+                    // functionalDescription) member's side.
+                    winding.isolationSide = windings.find((candidate) => group.includes(candidate.name)).isolationSide;
+                }
+                else {
+                    delete winding.woundWith;
+                }
+            }
+            this.oldMagneticCoilHash = null;
+            this.oldInputsCoilHash = null;
+            this.recentChange = true;
+            this.tryToWind();
+        },
+        async autoFitFromStudio() {
+            // Winding-studio Auto-fit: drop the hand-drawn rectangles (they pin
+            // geometry and would defeat the automatic layout) and re-derive the
+            // per-winding proportions from the wires — the engine's own default
+            // when none are given — then re-wind with the selected sections
+            // distribution (orientation/alignment/pattern/repetitions kept).
+            if (this.readOnly) {
+                return;
+            }
+            for (const sectionName of Object.keys(this.windingStudioStore.customSectionRects)) {
+                const sectionIndex = this.conductiveSections.findIndex((candidate) => candidate.name === sectionName);
+                if (sectionIndex >= 0 && this.localData.dataPerSection[sectionIndex] != null) {
+                    this.localData.dataPerSection[sectionIndex].topOrLeftMargin = 0;
+                    this.localData.dataPerSection[sectionIndex].bottomOrRightMargin = 0;
+                }
+            }
+            this.windingStudioStore.clearCustomSectionRects();
+            try {
+                const coil = deepCopy(this.masStore.mas.magnetic.coil);
+                coil.functionalDescription?.forEach((winding) => {
+                    if (winding.wire == null || winding.wire === "") winding.wire = "Dummy";
+                });
+                const proportions = await this.taskQueueStore.calculateAutoProportions(coil);
+                if (proportions.length !== this.localData.proportionPerWinding.length) {
+                    throw new Error(`Auto proportions came back with ${proportions.length} entries for ${this.localData.proportionPerWinding.length} windings`);
+                }
+                this.localData.proportionPerWinding = proportions.map((value) => roundWithDecimals(value, 0.01));
+            }
+            catch (error) {
+                console.error(error);
+                return;
+            }
+            this._studioGestureKey = 'studio:auto-fit';
+            this.oldMagneticCoilHash = null;
+            this.oldInputsCoilHash = null;
+            this.recentChange = true;
+            this.tryToWind();
+        },
+        setWindowLayoutFromStudio({ windowIndex, sectionsOrientation, sectionsAlignment, windingOrder = null }) {
+            // Winding-studio per-window gear: write the layout into THAT window's
+            // bobbin entry (array-aware: merged index → owning part) and re-wind.
+            if (this.readOnly) {
+                return;
+            }
+            const bobbin = this.masStore.mas.magnetic.coil.bobbin;
+            let targetWindow = null;
+            if (Array.isArray(bobbin)) {
+                let cursor = 0;
+                for (const part of bobbin) {
+                    const partWindows = part.processedDescription?.windingWindows ?? [];
+                    if (windowIndex < cursor + partWindows.length) {
+                        targetWindow = partWindows[windowIndex - cursor];
+                        break;
+                    }
+                    cursor += partWindows.length;
+                }
+            }
+            else if (typeof bobbin === 'object' && bobbin != null) {
+                targetWindow = bobbin.processedDescription?.windingWindows?.[windowIndex] ?? null;
+            }
+            if (targetWindow == null) {
+                console.error(`[WindingStudio] No bobbin window ${windowIndex} to set the layout on`);
+                return;
+            }
+            targetWindow.sectionsOrientation = sectionsOrientation;
+            targetWindow.sectionsAlignment = sectionsAlignment;
+            if (windingOrder != null) {
+                // U/Z lives on the same window entry as the two above, and the engine
+                // resolves it per section as the section's own windingOrder, else this
+                // one, else Z. It changes the WIND, not the drawing: U reverses every
+                // other layer, so the turns move — which is why it goes through the
+                // same re-wind as the rest of this panel.
+                targetWindow.windingOrder = windingOrder;
+            }
+            if (windowIndex === 0) {
+                // Keep the legacy window-0 knobs (Alignment panel + assignCoilData)
+                // in sync, or the next wind would write the old values back.
+                this.localData.sectionsOrientation = sectionsOrientation;
+                this.localData.sectionsAlignment = sectionsAlignment;
+            }
+            this._studioGestureKey = `studio:window:${windowIndex}`;
+            this.oldMagneticCoilHash = null;
+            this.oldInputsCoilHash = null;
+            this.recentChange = true;
+            this.tryToWind();
+        },
+        async resizeSectionRectFromStudio({ sectionName, coordinates, dimensions, margin = null }) {
+            // Winding-studio free transform: write the custom rectangle into the
+            // section and re-flow layers+turns INSIDE it. The rectangle's gaps to
+            // the window walls arrive as the section's margins (tape), kept in
+            // dataPerSection so they ride every future wind.
+            if (this.readOnly || this.placingWinding) {
+                return;
+            }
+            const coil = deepCopy(this.masStore.mas.magnetic.coil);
+            const section = (coil.sectionsDescription ?? []).find((candidate) => candidate.name === sectionName);
+            if (section == null) {
+                return;
+            }
+            section.coordinates = coordinates;
+            section.dimensions = dimensions;
+            // Stale layer count from the previous wind would prevent re-packing
+            // into the new rectangle (wind_by_layers honors it when present).
+            section.numberLayers = null;
+            if (margin != null) {
+                section.margin = margin;
+                const sectionIndex = this.conductiveSections.findIndex((candidate) => candidate.name === sectionName);
+                if (sectionIndex >= 0 && this.localData.dataPerSection[sectionIndex] != null) {
+                    this.localData.dataPerSection[sectionIndex].topOrLeftMargin = margin[0];
+                    this.localData.dataPerSection[sectionIndex].bottomOrRightMargin = margin[1];
+                }
+            }
+            // Pin the drawn rectangle: every subsequent full wind re-imposes it
+            // (the engine applies pins after compaction), so the custom layout
+            // survives turns/wire/proportion/margin edits. The window shape rides
+            // along so the pin only ever applies to the geometry it was drawn on.
+            const windowShape = effectiveBobbin(this.masStore.mas.magnetic.coil?.bobbin)?.processedDescription?.windingWindows?.[0]?.shape ?? null;
+            this.windingStudioStore.setCustomSectionRect(sectionName, { coordinates, dimensions, windowShape });
+            this.placingWinding = true;
+            try {
+                const coreColumns = this.masStore.mas.magnetic.core?.processedDescription?.columns ?? null;
+                const rewound = await this.taskQueueStore.rewindLayersAndTurns(coil, coreColumns);
+                const existingBobbin = this.masStore.mas.magnetic.coil.bobbin;
+                this.masStore.mas.magnetic.coil = rewound;
+                this.masStore.mas.magnetic.coil.bobbin = existingBobbin;
+                this.historyStore.unblockAdditions();
+                // Coalesced: successive reshapes of the same section collapse
+                // into one undo step (the pre-gesture state stays one step back).
+                this.historyStore.addToHistory(this.masStore.mas, `studio:rect:${sectionName}`);
+            }
+            catch (error) {
+                console.error(error);
+            }
+            finally {
+                this.placingWinding = false;
+            }
+        },
+        windingGroupEntries(windingEntry) {
+            // Wound-together partners move as one: a leg placement applied to
+            // any member applies to the whole group.
+            const partners = windingEntry.woundWith ?? [];
+            return [windingEntry, ...this.masStore.mas.magnetic.coil.functionalDescription
+                .filter((candidate) => partners.includes(candidate.name))];
+        },
+        async placeWindingInColumn({ winding, columnIndex }) {
+            // Winding-studio drop: place a winding around the given core leg.
+            // The intent is winding-level windingWindow; the WASM winder computes
+            // every coordinate on the columns-aware re-wind below.
+            if (this.placingWinding || this.readOnly) {
+                return;
+            }
+            // Catalog bobbins are real parts: never silently replace them with a
+            // generated simple bobbin. Dropping on the CENTER leg keeps the part
+            // (its window is merged window 0). Dropping on a LATERAL leg keeps it
+            // too: the leg gets its own generated ad-hoc bobbin and coil.bobbin
+            // becomes the MAS per-column ARRAY [catalogPart, ...lateralParts] —
+            // two items on the BOM. The engine winds the merged windows.
+            const currentBobbin = this.masStore.mas.magnetic.coil.bobbin;
+            const centrePart = Array.isArray(currentBobbin) ? currentBobbin[0] : currentBobbin;
+            const isCatalogBobbin = typeof centrePart === 'string'
+                || (centrePart != null && centrePart !== 'Dummy' && centrePart.functionalDescription != null);
+            if (isCatalogBobbin) {
+                const targetColumn = this.masStore.mas.magnetic.core?.processedDescription?.columns?.[columnIndex];
+                if (targetColumn == null) {
+                    console.error(`[WindingStudio] Column ${columnIndex} not found in the processed core`);
+                    return;
+                }
+                const windingEntry = this.masStore.mas.magnetic.coil.functionalDescription
+                    .find((entry) => entry.name === winding);
+                if (windingEntry == null) {
+                    return;
+                }
+                for (const member of this.windingGroupEntries(windingEntry)) {
+                    this.windingStudioStore.clearCustomSectionRectsForWinding(member.name);
+                }
+                if (targetColumn.type === 'central') {
+                    for (const member of this.windingGroupEntries(windingEntry)) {
+                        member.windingWindow = 0;
+                    }
+                    this.pruneUnusedLateralBobbinParts();
+                    this.recentChange = true;
+                    this.tryToWind();
+                    return;
+                }
+                await this.placeCatalogWindingLaterally(windingEntry, columnIndex);
+                return;
+            }
+            this.placingWinding = true;
+            // Moving a winding to another leg invalidates its drawn rectangles.
+            this.windingStudioStore.clearCustomSectionRectsForWinding(winding);
+            try {
+                // 1. From now on the engine emits one winding window per wound-column
+                //    edge (idempotent; legacy geometry is byte-identical when nothing
+                //    is placed laterally).
+                const settings = await this.taskQueueStore.getSettings();
+                if (!settings.corePerColumnWindingWindows) {
+                    settings.corePerColumnWindingWindows = true;
+                    await this.taskQueueStore.setSettings(settings);
+                }
+
+                // 2. Reprocess the core so it carries the per-column windows. Flag the
+                //    pending bobbin regeneration so the coreProcessed subscriber does
+                //    not fire an interim wind with the stale placement.
+                this.taskQueueStore.bobbinRegenerationPending = true;
+                const core = await this.taskQueueStore.processCore(deepCopy(this.masStore.mas.magnetic.core));
+                this.masStore.mas.magnetic.core = core;
+
+                // 3. Map the dropped leg to its winding window.
+                const windows = core.processedDescription?.windingWindows ?? [];
+                const windowIndex = windows.findIndex((window) => (window.column ?? 0) === columnIndex);
+                if (windowIndex < 0) {
+                    throw new Error(`No winding window wraps column ${columnIndex} (the core has ${windows.length} windows)`);
+                }
+
+                // 4. Placement intent on the winding — and on its whole
+                //    wound-together group (partners share sections, so they
+                //    move between legs as one).
+                const windingEntry = this.masStore.mas.magnetic.coil.functionalDescription
+                    .find((entry) => entry.name === winding);
+                if (windingEntry == null) {
+                    throw new Error(`Winding ${winding} not found in the functional description`);
+                }
+                for (const member of this.windingGroupEntries(windingEntry)) {
+                    member.windingWindow = windowIndex;
+                    this.windingStudioStore.clearCustomSectionRectsForWinding(member.name);
+                }
+
+                // 5. Regenerate the bobbin from the reprocessed core (keeps the custom
+                //    thicknesses); its callback re-triggers the wind machinery, which
+                //    now rides the columns-aware path.
+                const bobbin = await this.taskQueueStore.generateBobbinDifferentThicknesses(
+                    this.masStore.mas.magnetic.core,
+                    this.localData.bobbinWallThickness,
+                    this.localData.bobbinColumnThickness);
+                this.masStore.mas.magnetic.coil.bobbin = bobbin;
+            }
+            catch (error) {
+                console.error(error);
+                this.taskQueueStore.bobbinRegenerationPending = false;
+            }
+            finally {
+                this.placingWinding = false;
+            }
+        },
+        async placeCatalogWindingLaterally(windingEntry, columnIndex) {
+            // Lateral drop with a catalog bobbin: keep the catalog part on the
+            // centre leg and give the dropped leg its own generated ad-hoc bobbin
+            // (a second BOM item). MAS models this as the coil.bobbin per-column
+            // array; the engine merges every part's winding windows for the wind.
+            this.placingWinding = true;
+            try {
+                const currentBobbin = this.masStore.mas.magnetic.coil.bobbin;
+                let catalogPart = Array.isArray(currentBobbin) ? currentBobbin[0] : currentBobbin;
+                if (typeof catalogPart === 'string' || catalogPart?.processedDescription == null) {
+                    // By-name (or unprocessed) catalog bobbin: materialize the full
+                    // part — only the engine can resolve names / process geometry.
+                    const magneticWithCatalogBobbin = deepCopy(this.masStore.mas.magnetic);
+                    magneticWithCatalogBobbin.coil.bobbin = catalogPart;
+                    catalogPart = await this.taskQueueStore.materializeBobbin(magneticWithCatalogBobbin);
+                }
+                if (catalogPart?.processedDescription == null) {
+                    throw new Error('[WindingStudio] The catalog bobbin has no processedDescription; cannot derive the ad-hoc lateral bobbin');
+                }
+
+                // 1. Engine emits one winding window per wound-column edge.
+                const settings = await this.taskQueueStore.getSettings();
+                if (!settings.corePerColumnWindingWindows) {
+                    settings.corePerColumnWindingWindows = true;
+                    await this.taskQueueStore.setSettings(settings);
+                }
+
+                // 2. Reprocess the core so it carries the per-column windows. Flag
+                //    the pending bobbin regeneration so the coreProcessed subscriber
+                //    does not fire an interim wind with the stale placement.
+                this.taskQueueStore.bobbinRegenerationPending = true;
+                const core = await this.taskQueueStore.processCore(deepCopy(this.masStore.mas.magnetic.core));
+                this.masStore.mas.magnetic.core = core;
+
+                // 3. Ad-hoc lateral part: generate the simple bobbin for the whole
+                //    core with the catalog part's own thicknesses, then keep only
+                //    the dropped column's window(s) — each carries its column edge,
+                //    which is what the winder follows.
+                const wallThickness = catalogPart.processedDescription.wallThickness;
+                const columnThickness = catalogPart.processedDescription.columnThickness;
+                if (wallThickness == null || columnThickness == null) {
+                    throw new Error('[WindingStudio] The catalog bobbin has no wall/column thickness; cannot derive the ad-hoc lateral bobbin');
+                }
+                const generated = await this.taskQueueStore.generateBobbinDifferentThicknesses(core, wallThickness, columnThickness);
+                const lateralWindows = (generated.processedDescription?.windingWindows ?? [])
+                    .filter((window) => (window.column ?? 0) === columnIndex);
+                if (lateralWindows.length === 0) {
+                    throw new Error(`[WindingStudio] The generated bobbin has no winding window for column ${columnIndex}`);
+                }
+                const lateralPart = {
+                    ...generated,
+                    processedDescription: { ...generated.processedDescription, windingWindows: lateralWindows },
+                };
+
+                // 4. Assemble the per-column array (replacing any existing part for
+                //    this column) and point the winding at the part's first window
+                //    in the merged (concatenated) window order the engine builds.
+                const parts = Array.isArray(currentBobbin) ? [...currentBobbin] : [catalogPart];
+                parts[0] = catalogPart;
+                let partIndex = parts.findIndex((part, index) => index > 0
+                    && (part.processedDescription?.windingWindows ?? []).some((window) => (window.column ?? 0) === columnIndex));
+                if (partIndex < 0) {
+                    parts.push(lateralPart);
+                    partIndex = parts.length - 1;
+                }
+                else {
+                    parts[partIndex] = lateralPart;
+                }
+                let mergedWindowIndex = 0;
+                for (let index = 0; index < partIndex; index++) {
+                    mergedWindowIndex += (parts[index].processedDescription?.windingWindows ?? []).length;
+                }
+                for (const member of this.windingGroupEntries(windingEntry)) {
+                    member.windingWindow = mergedWindowIndex;
+                }
+                this.masStore.mas.magnetic.coil.bobbin = parts;
+                this.pruneUnusedLateralBobbinParts();
+                // The generateBobbinDifferentThicknesses callback clears the pending
+                // flag and triggers the wind with the assembled array.
+            }
+            catch (error) {
+                console.error(error);
+                this.taskQueueStore.bobbinRegenerationPending = false;
+            }
+            finally {
+                this.placingWinding = false;
+            }
+        },
+        pruneUnusedLateralBobbinParts() {
+            // Per-column bobbin housekeeping: drop ad-hoc lateral parts no winding
+            // references any more (an unused part would be a phantom BOM item) and
+            // remap every winding's merged window index. Collapses back to the
+            // plain catalog scalar when only the centre part remains.
+            const bobbin = this.masStore.mas.magnetic.coil.bobbin;
+            if (!Array.isArray(bobbin)) {
+                return;
+            }
+            const windowCounts = bobbin.map((part) => (part.processedDescription?.windingWindows ?? []).length);
+            const partStart = [];
+            let cursor = 0;
+            windowCounts.forEach((count) => { partStart.push(cursor); cursor += count; });
+            const partOfWindow = (windowIndex) => {
+                for (let index = bobbin.length - 1; index >= 0; index--) {
+                    if (windowIndex >= partStart[index]) {
+                        return index;
+                    }
+                }
+                return 0;
+            };
+            const windings = this.masStore.mas.magnetic.coil.functionalDescription;
+            const referencedParts = new Set([0]);
+            windings.forEach((entry) => { referencedParts.add(partOfWindow(entry.windingWindow ?? 0)); });
+            if (referencedParts.size === bobbin.length) {
+                return;
+            }
+            const keptIndices = bobbin.map((part, index) => index).filter((index) => referencedParts.has(index));
+            const newStart = new Map();
+            let newCursor = 0;
+            keptIndices.forEach((oldIndex) => { newStart.set(oldIndex, newCursor); newCursor += windowCounts[oldIndex]; });
+            windings.forEach((entry) => {
+                const oldWindow = entry.windingWindow ?? 0;
+                const oldPart = partOfWindow(oldWindow);
+                entry.windingWindow = newStart.get(oldPart) + (oldWindow - partStart[oldPart]);
+            });
+            const keptParts = keptIndices.map((oldIndex) => bobbin[oldIndex]);
+            this.masStore.mas.magnetic.coil.bobbin = keptParts.length === 1 ? keptParts[0] : keptParts;
         },
         wind() {
             // Skip winding for toroidal cores or when bobbin is dummy/invalid
@@ -484,14 +1179,48 @@ export default {
             inputCoil["_interlayerInsulationThickness"] = this.localData.interlayerThickness;
             inputCoil["_intersectionInsulationThickness"] = this.localData.intersectionThickness;
             
-            // Include margins in hash computation to detect margin changes even when sectionsDescription doesn't exist yet
+            // Include margins in hash computation to detect margin changes even when sectionsDescription doesn't exist yet.
+            // The winding-studio pins (drawn section rects) and the compact switch also
+            // ride the hash so clearing/toggling them re-winds.
+            // Defense in depth for the shape-change watcher: a pin only rides the
+            // wind when the current winding window has the same shape it was
+            // drawn on. A rect from a rectangular window applied to a round one
+            // (or vice versa) reinterprets meters as degrees and corrupts the coil.
+            const currentWindowShape = effectiveBobbin(bobbin)?.processedDescription?.windingWindows?.[0]?.shape ?? null;
+            let customSectionRects = null;
+            if (this.windingStudioStore.customSectionCount > 0) {
+                const matchingRects = {};
+                for (const [sectionName, rect] of Object.entries(this.windingStudioStore.customSectionRects)) {
+                    if (rect.windowShape == null || rect.windowShape === currentWindowShape) {
+                        matchingRects[sectionName] = { coordinates: rect.coordinates, dimensions: rect.dimensions };
+                    }
+                }
+                if (Object.keys(matchingRects).length > 0) {
+                    customSectionRects = matchingRects;
+                }
+            }
+            const compactEnabled = this.windingStudioStore.compactEnabled;
+            // Winding-style overrides (studio parallels knob) ride the wind and
+            // the no-op hash so changing one re-winds.
+            const windingStyleOverrides = Object.keys(this.windingStudioStore.windingStyleOverrides).length > 0
+                ? { ...this.windingStudioStore.windingStyleOverrides }
+                : null;
+            if (windingStyleOverrides != null) {
+                inputCoil["_windingStyle"] = windingStyleOverrides;
+            }
             const coilWithMargins = {
                 ...this.masStore.mas.magnetic.coil,
-                _margins: margins
+                _margins: margins,
+                _customSectionRects: customSectionRects,
+                _windingStyle: windingStyleOverrides,
+                _compact: compactEnabled
             };
             const inputCoilWithMargins = {
                 ...inputCoil,
-                _margins: margins
+                _margins: margins,
+                _customSectionRects: customSectionRects,
+                _windingStyle: windingStyleOverrides,
+                _compact: compactEnabled
             };
             
             const newMagneticCoilHash = generateHash(JSON.stringify(coilWithMargins));
@@ -510,9 +1239,15 @@ export default {
                         pattern.push(Number(char) - 1);
                     });
 
-                    this.taskQueueStore.wind(inputCoil, this.localData.repetitions, this.localData.proportionPerWinding, pattern, margins).then((coil) => {
+                    // Core columns ride along so multi-column placements (winding
+                    // studio) can wind lateral-leg frames; no-op for classic coils.
+                    const coreColumns = this.masStore.mas.magnetic.core?.processedDescription?.columns ?? null;
+                    this.taskQueueStore.wind(inputCoil, this.localData.repetitions, this.localData.proportionPerWinding, pattern, margins, coreColumns, customSectionRects, compactEnabled).then((coil) => {
                         this.taskQueueStore.calculateFillingFactors(coil).then((fillingFactors) => {
                             this.localData.fillingFactors = fillingFactors;
+                            // A layout that shows the coil's numbers away from this
+                            // panel needs them too (ABT #1121).
+                            this.$emit('fillingFactorsChanged', fillingFactors);
                         })
 
                         this.taskQueueStore.checkIfSectionsAndLayersFit(coil).then((fits) => {
@@ -528,7 +1263,10 @@ export default {
                         // Unblock FIRST so addToHistory succeeds — during initial
                         // mount and file import, history is blocked until this point.
                         this.historyStore.unblockAdditions();
-                        this.historyStore.addToHistory(this.masStore.mas);
+                        // Studio gestures pass a key so a flurry of re-winds from
+                        // one drag coalesces into a single undo step.
+                        this.historyStore.addToHistory(this.masStore.mas, this._studioGestureKey);
+                        this._studioGestureKey = null;
                         this.tryingToSend = false;
                     })
                     .catch(error => {
@@ -577,17 +1315,18 @@ export default {
             if (!this.blockingRebounds) {
                 try {
                     if (magnetic.coil.bobbin != "" && magnetic.coil.bobbin != "Dummy") {
-                        if (magnetic.coil.bobbin.processedDescription != null) {
-                            if (magnetic.coil.bobbin.processedDescription.windingWindows != null) {
-                                if (magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsAlignment != null) {
-                                    this.localData.sectionsAlignment = magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsAlignment;
+                        const localDataBobbin = effectiveBobbin(magnetic.coil.bobbin);
+                        if (localDataBobbin.processedDescription != null) {
+                            if (localDataBobbin.processedDescription.windingWindows != null) {
+                                if (localDataBobbin.processedDescription.windingWindows[0].sectionsAlignment != null) {
+                                    this.localData.sectionsAlignment = localDataBobbin.processedDescription.windingWindows[0].sectionsAlignment;
                                 }
-                                if (magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation != null) {
-                                    this.localData.sectionsOrientation = magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation;
+                                if (localDataBobbin.processedDescription.windingWindows[0].sectionsOrientation != null) {
+                                    this.localData.sectionsOrientation = localDataBobbin.processedDescription.windingWindows[0].sectionsOrientation;
                                 }
-                                if (magnetic.coil.bobbin.processedDescription.wallThickness != null && magnetic.coil.bobbin.processedDescription.columnThickness != null) {
-                                    this.localData.bobbinWallThickness = magnetic.coil.bobbin.processedDescription.wallThickness;
-                                    this.localData.bobbinColumnThickness = magnetic.coil.bobbin.processedDescription.columnThickness;
+                                if (localDataBobbin.processedDescription.wallThickness != null && localDataBobbin.processedDescription.columnThickness != null) {
+                                    this.localData.bobbinWallThickness = localDataBobbin.processedDescription.wallThickness;
+                                    this.localData.bobbinColumnThickness = localDataBobbin.processedDescription.columnThickness;
                                 }
                             }
                         }
@@ -686,16 +1425,21 @@ export default {
             }
         },
         assignCoilData() {
-            if (this.masStore.mas.magnetic.coil.bobbin.processedDescription == null) {
-                this.masStore.mas.magnetic.coil.bobbin.processedDescription = {};
+            // Per-column array form: the alignment/orientation knobs belong to the
+            // centre part's window (element 0), never to the Array object itself.
+            const coilDataBobbin = Array.isArray(this.masStore.mas.magnetic.coil.bobbin)
+                ? this.masStore.mas.magnetic.coil.bobbin[0]
+                : this.masStore.mas.magnetic.coil.bobbin;
+            if (coilDataBobbin.processedDescription == null) {
+                coilDataBobbin.processedDescription = {};
             }
-            if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows == null) {
-                this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows = [];
-                this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows.push({});
+            if (coilDataBobbin.processedDescription.windingWindows == null) {
+                coilDataBobbin.processedDescription.windingWindows = [];
+                coilDataBobbin.processedDescription.windingWindows.push({});
             }
 
-            this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsAlignment = this.localData.sectionsAlignment;
-            this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation = this.localData.sectionsOrientation;
+            coilDataBobbin.processedDescription.windingWindows[0].sectionsAlignment = this.localData.sectionsAlignment;
+            coilDataBobbin.processedDescription.windingWindows[0].sectionsOrientation = this.localData.sectionsOrientation;
 
             // Update margins in the coil's sectionsDescription
             if (this.masStore.mas.magnetic.coil.sectionsDescription != null) {
@@ -773,6 +1517,13 @@ export default {
 
             // Check if thickness actually changed from current bobbin to avoid infinite loop
             const currentBobbin = this.masStore.mas.magnetic.coil.bobbin;
+            if (Array.isArray(currentBobbin)) {
+                // Per-column bobbins (catalog centre part + ad-hoc lateral parts):
+                // regenerating a single simple bobbin here would silently discard
+                // the catalog part. The centre part's thickness is the part's own.
+                console.error('[BasicCoilSelector] Bobbin thickness cannot be edited on a per-column bobbin set: the centre part is a real catalog bobbin.');
+                return;
+            }
             if (currentBobbin && currentBobbin !== "Dummy" && currentBobbin.processedDescription) {
                 const currentWall = currentBobbin.processedDescription.wallThickness;
                 const currentColumn = currentBobbin.processedDescription.columnThickness;
@@ -821,6 +1572,16 @@ export default {
                 </div>
                 <div class="coil-config-header-right">
                     <button
+                        type="button"
+                        :disabled="loading"
+                        :class="['coil-config-header-btn', magneticBuilderSettingsStore.enableWindingStudio ? 'coil-config-header-btn-primary' : 'coil-config-header-btn-outline']"
+                        :data-cy="dataTestLabel + '-Coil-WindingStudio-button'"
+                        @click="magneticBuilderSettingsStore.enableWindingStudio = !magneticBuilderSettingsStore.enableWindingStudio"
+                    >
+                        <i class="pi pi-objects-column"></i>
+                        <span>Studio</span>
+                    </button>
+                    <button
                         v-if="!masStore.hasMirroredWindings"
                         type="button"
                         :disabled="!enableSubmenu || loading"
@@ -842,10 +1603,57 @@ export default {
                 </div>
             </div>
             <div class="coil-config-body">
+                <!-- min-height, not just max-height: Magnetic2DVisualizer sizes its drawing
+                     FROM this box, and this box was sized BY its content, so a portrait core
+                     collapsed the row to the drawing's own intrinsic height and the drawing
+                     was then "scaled" to the size it already was (measured: a 50 x 83 SVG in
+                     a 524 x 91 row). Landscape cores never showed it, taking the visualizer's
+                     100%-width branch instead. A real height breaks the circularity.
+
+                     It has to be `height`, not `min-height`: the visualizer's own box is
+                     height:100%, and a percentage height resolves against the parent's
+                     DEFINITE height — min-height does not make one, so height:100% fell back
+                     to auto and the row collapsed to its content exactly as before. -->
                 <div
-                    v-if="useVisualizers && masStore.mas.magnetic != null && masStore.mas.magnetic.core != null && masStore.mas.magnetic.core.functionalDescription.shape != ''"
-                    class="row mb-3"
+                    v-if="magneticBuilderSettingsStore.enableWindingStudio && useVisualizers && masStore.mas.magnetic != null && masStore.mas.magnetic.core != null && masStore.mas.magnetic.core.functionalDescription.shape != ''"
+                    class="mb-3"
                     :style="(imageUpToDate? 'opacity: 100%;' : 'opacity: 20%;') + ' max-height: 50vh;'"
+                >
+                    <WindingStudio
+                        :dataTestLabel="dataTestLabel"
+                        :masStore="masStore"
+                        :editable="!readOnly"
+                        :busy="placingWinding"
+                        :customCount="windingStudioStore.customSectionCount"
+                        :showCompactToggle="true"
+                        :compact="windingStudioStore.compactEnabled"
+                        :fieldOverlay="fieldOverlaySvg"
+                        :windingStyleOverrides="windingStudioStore.windingStyleOverrides"
+                        @placeWinding="placeWindingInColumn"
+                        @resizeProportions="resizeProportionsFromStudio"
+                        @resizeMargins="resizeMarginsFromStudio"
+                        @resizeSectionRect="resizeSectionRectFromStudio"
+                        @clearCustomRects="clearCustomLayoutFromStudio"
+                        @update:compact="setCompactFromStudio"
+                        @interleaveWinding="interleaveFromStudio"
+                        @requestFieldOverlay="requestFieldOverlayFromStudio"
+                        @setWindowLayout="setWindowLayoutFromStudio"
+                        @setSectionLayout="setSectionLayoutFromStudio"
+                        @autoFit="autoFitFromStudio"
+                        @setWindingGroups="setWindingGroupsFromStudio"
+                        :ferriteColor="$styleStore.magneticBuilder.painterColorFerrite || '0x7b7c7d'"
+                        :bobbinColor="$styleStore.magneticBuilder.painterColorBobbin || '0x539796'"
+                        :copperColor="$styleStore.magneticBuilder.painterColorCopper || '0xb87333'"
+                        :insulationColor="$styleStore.magneticBuilder.painterColorInsulation || '0xfff05b'"
+                        :marginColor="$styleStore.magneticBuilder.painterColorMargin || '0xfff05b'"
+                        :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || 'transparent'"
+                        :textColor="$styleStore.magneticBuilder.inputTextColor?.color || '#ffffff'"
+                    />
+                </div>
+                <div
+                    v-else-if="useVisualizers && masStore.mas.magnetic != null && masStore.mas.magnetic.core != null && masStore.mas.magnetic.core.functionalDescription.shape != ''"
+                    class="row mb-3"
+                    :style="(imageUpToDate? 'opacity: 100%;' : 'opacity: 20%;') + ' height: 260px; max-height: 50vh;'"
                 >
                      <Magnetic2DVisualizer
                          :modelValue="masStore.mas"
@@ -869,7 +1677,7 @@ export default {
                          :enableTemperaturePlot="enableTemperaturePlot"
                          @plotModeChange="$emit('plotModeChange', $event)"
                          @swapIncludeFringing="$emit('swapIncludeFringing', $event)"
-                        @errorInImage="$emit('errorInImage')"
+                        @errorInImage="$emit('errorInImage', $event)"
                         :loadingGif="$settingsStore.loadingGif"
                     />
                 </div>
@@ -972,7 +1780,7 @@ export default {
                 </div>
 
                 <CoilInfo
-                    v-if="!loading && enableSimulation"
+                    v-if="showInfoPanel && !loading && enableSimulation"
                     ref="coilInfo"
                     :dataTestLabel="dataTestLabel + '-BasicCoreInfo'"
                     :advancedMode="$settingsStore.magneticBuilderSettings.advancedMode"
@@ -1009,8 +1817,8 @@ export default {
 
 <style scoped>
 .coil-config-panel {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.2);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 6%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.25rem 0;
@@ -1022,9 +1830,13 @@ export default {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    /* The action buttons do not fit beside the title in a narrow column:
+     * let them wrap under it rather than spill past the card (ABT #1121). */
+    flex-wrap: wrap;
+    row-gap: 0.35rem;
     padding: 0.6rem 0.9rem;
-    background: rgba(120, 120, 120, 0.1);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.9rem;
     color: var(--p-primary);
@@ -1035,6 +1847,13 @@ export default {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    min-width: 0;
+}
+
+.coil-config-header-left span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .coil-config-header-left i {
@@ -1046,6 +1865,10 @@ export default {
     display: flex;
     align-items: center;
     gap: 0.35rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 0.3rem;
+    min-width: 0;
 }
 
 .coil-config-header-btn {
@@ -1077,27 +1900,27 @@ export default {
     background: linear-gradient(135deg,
         color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
         var(--p-primary) 55%,
-        rgb(var(--p-primary-rgb) / 0.85) 100%);
+        rgba(var(--p-primary-rgb), 0.85) 100%);
     color: var(--p-white);
     border: 1px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 1px rgb(var(--p-primary-rgb) / 0.35),
-        0 2px 8px rgb(var(--p-primary-rgb) / 0.4),
+        0 0 0 1px rgba(var(--p-primary-rgb), 0.35),
+        0 2px 8px rgba(var(--p-primary-rgb), 0.4),
         inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
     text-shadow: 0 1px 1px rgba(var(--p-black-rgb), 0.25);
 }
 
 .coil-config-header-btn-outline {
-    background: rgb(var(--p-primary-rgb) / 0.2);
-    border: 1px solid rgb(var(--p-primary-rgb) / 0.55);
+    background: rgba(var(--p-primary-rgb), 0.2);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.55);
     color: var(--p-primary);
     box-shadow: 0 1px 4px rgba(var(--p-black-rgb), 0.2);
 }
 
 .coil-config-header-btn-outline:hover {
-    background: rgb(var(--p-primary-rgb) / 0.3);
-    border-color: rgb(var(--p-primary-rgb) / 0.75);
-    box-shadow: 0 2px 6px rgb(var(--p-primary-rgb) / 0.25);
+    background: rgba(var(--p-primary-rgb), 0.3);
+    border-color: rgba(var(--p-primary-rgb), 0.75);
+    box-shadow: 0 2px 6px rgba(var(--p-primary-rgb), 0.25);
 }
 
 .coil-config-body {
@@ -1259,19 +2082,19 @@ export default {
     background: linear-gradient(135deg,
         color-mix(in srgb, var(--p-success) 115%, transparent 0%) 0%,
         var(--p-success) 55%,
-        rgb(var(--p-success-rgb) / 0.85) 100%);
+        rgba(var(--p-success-rgb), 0.85) 100%);
     color: var(--p-white);
     border: 2px solid color-mix(in srgb, var(--p-success) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 2px rgb(var(--p-success-rgb) / 0.35),
-        0 4px 14px rgb(var(--p-success-rgb) / 0.5),
+        0 0 0 2px rgba(var(--p-success-rgb), 0.35),
+        0 4px 14px rgba(var(--p-success-rgb), 0.5),
         inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
     text-shadow: 0 1px 2px rgba(var(--p-black-rgb), 0.25);
 }
 
 .builder-action-btn-outline {
-    background: rgb(var(--p-primary-rgb) / 0.2);
-    border: 1px solid rgb(var(--p-primary-rgb) / 0.55);
+    background: rgba(var(--p-primary-rgb), 0.2);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.55);
     color: var(--p-primary);
     box-shadow: 0 2px 6px rgba(var(--p-black-rgb), 0.2);
 }

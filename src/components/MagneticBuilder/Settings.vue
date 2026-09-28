@@ -4,9 +4,13 @@ import { useMagneticBuilderSettingsStore } from '../../stores/magneticBuilderSet
 import { useModelSettingsStore } from '../../stores/modelSettings'
 import { useStateStore } from '../../stores/state'
 import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
+import UserPreferencesSettings from '/WebSharedComponents/Common/UserPreferencesSettings.vue'
 </script>
 
 <script>
+// In the plain block, not <script setup>: data() and methods below use these,
+// and an Options API member cannot see a <script setup> binding.
+import { BUILDER_LAYOUTS, layoutLabels, isKnownLayout } from './layouts/index.js'
 
 export default {
     components: { Dialog },
@@ -38,15 +42,31 @@ export default {
         }
 
         const settingsChanged = false;
+        const layoutOptions = layoutLabels();
+        const layoutDescriptions = Object.fromEntries(
+            Object.entries(BUILDER_LAYOUTS).map(([key, layout]) => [key, layout.description]),
+        );
+
         return {
             localData,
             settingsChanged,
             magneticBuilderSettingsStore,
             modelSettingsStore,
             stateStore,
+            layoutOptions,
+            layoutDescriptions,
         }
     },
     methods: {
+        /** The builder's arrangement (ABT #1121); roams with the profile. */
+        layoutChanged(event) {
+            const chosen = event.target.value;
+            if (!isKnownLayout(chosen)) {
+                throw new Error(`Unknown builder layout "${chosen}"`);
+            }
+            this.magneticBuilderSettingsStore.layout = chosen;
+            this.settingsChanged = true;
+        },
         onSettingChanged(setting) {
             this.localData[setting] = !this.localData[setting];
             this.magneticBuilderSettingsStore[setting] = this.localData[setting];
@@ -261,6 +281,27 @@ export default {
                                 @change="onSettingChanged('enableGraphs')"
                             >
                         </div>
+                    </div>
+
+                    <!-- Layout (ABT #1121) -->
+                    <div class="setting-item d-flex justify-content-between align-items-center py-3 border-bottom border-secondary">
+                        <div>
+                            <h6 class="text-white mb-1">Layout</h6>
+                            <small class="text-secondary">{{ layoutDescriptions[magneticBuilderSettingsStore.layout] }}</small>
+                        </div>
+                        <select
+                            :data-cy="dataTestLabel + '-Settings-Modal-layout-select'"
+                            class="builder-layout-select"
+                            :value="magneticBuilderSettingsStore.layout"
+                            @change="layoutChanged"
+                        >
+                            <option v-for="(label, key) in layoutOptions" :key="key" :value="key">{{ label }}</option>
+                        </select>
+                    </div>
+
+                    <!-- Preferences (profile, ABT #1099) — shared with WebFrontend's settings pages -->
+                    <div class="mt-4">
+                        <UserPreferencesSettings :dataTestLabel="dataTestLabel + '-Settings-Modal'" @changed="settingsChanged = true" />
                     </div>
 
                     <!-- Simulation Models Section -->
@@ -512,6 +553,22 @@ export default {
 
 
 <style scoped>
+.builder-layout-select {
+    flex: 0 0 auto;
+    max-width: 15rem;
+    padding: 0.3rem 0.5rem;
+    background-color: var(--p-gray-800);
+    color: var(--p-gray-100);
+    border: 1px solid var(--p-secondary);
+    border-radius: var(--p-border-radius);
+    font-size: 0.85rem;
+}
+
+.builder-layout-select:focus {
+    outline: none;
+    border-color: var(--p-primary);
+}
+
 .settings {
     z-index: 9999;
 }

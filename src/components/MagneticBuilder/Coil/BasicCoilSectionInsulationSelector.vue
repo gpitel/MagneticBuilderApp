@@ -1,6 +1,6 @@
 <script setup>
 import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
-import { toTitleCase, checkAndFixMas, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
+import { toTitleCase, checkAndFixMas, deepCopy, effectiveBobbin } from '/WebSharedComponents/assets/js/utils.js'
 import SectionSelector from './SectionSelector.vue'
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
@@ -57,7 +57,7 @@ export default {
             return s ? `${s.topOrLeftMargin}|${s.bottomOrRightMargin}` : '';
         },
         topOrLeftMarginTooltip() {
-            if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == 'contiguous') {
+            if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].sectionsOrientation == 'contiguous') {
                 return tooltipsMagneticBuilder.leftMargin;
             }
             else {
@@ -65,7 +65,7 @@ export default {
             }
         },
         bottomOrRightMarginTooltip() {
-            if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == 'contiguous') {
+            if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].sectionsOrientation == 'contiguous') {
                 return tooltipsMagneticBuilder.rightMargin;
             }
             else {
@@ -107,7 +107,7 @@ export default {
         },
         topOrInnerMarginUpdated(sectionIndex) {
             if (!this.blockingRebounds) {
-                const isMarginHorizontal = this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == "contiguous";
+                const isMarginHorizontal = effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].sectionsOrientation == "contiguous";
 
                 this.taskQueueStore.checkIfFits(this.masStore.mas.magnetic.coil.bobbin, this.data.dataPerSection[sectionIndex].topOrLeftMargin, isMarginHorizontal).then((fits) => {
                     if (fits) {
@@ -125,7 +125,7 @@ export default {
         },
         bottomOrOuterMarginUpdated(sectionIndex) {
             if (!this.blockingRebounds) {
-                const isMarginHorizontal = this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].sectionsOrientation == "contiguous";
+                const isMarginHorizontal = effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].sectionsOrientation == "contiguous";
                 this.taskQueueStore.checkIfFits(this.masStore.mas.magnetic.coil.bobbin, this.data.dataPerSection[sectionIndex].topOrLeftMargin, isMarginHorizontal).then((fits) => {
                     if (fits) {
                         this.$emit('marginUpdated', sectionIndex);
@@ -282,8 +282,8 @@ export default {
 
 <style scoped>
 .insulation-panel {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.08) 0%, rgba(120, 120, 120, 0.02) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.2);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 8%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);
     border-radius: 14px;
     padding: 0;
     margin: 0.15rem 0 0.5rem 0;
@@ -308,8 +308,8 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem 1rem;
-    background: rgba(120, 120, 120, 0.12);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 12%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.92rem;
     color: var(--p-primary);
@@ -344,7 +344,7 @@ export default {
 }
 
 .insulation-close-btn:hover {
-    background: rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     color: var(--p-white);
 }
 

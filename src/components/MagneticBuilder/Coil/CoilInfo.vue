@@ -1,10 +1,11 @@
 <script setup>
-import { removeTrailingZeroes, deepCopy, isMobile } from '/WebSharedComponents/assets/js/utils.js'
+import { removeTrailingZeroes, deepCopy, isMobile, effectiveBobbin } from '/WebSharedComponents/assets/js/utils.js'
 import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.vue'
 import WindingSelector from '../Common/WindingSelector.vue'
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 import { useModelSettingsStore } from '../../../stores/modelSettings'
+import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
 </script>
 
 <script>
@@ -79,7 +80,7 @@ export default {
         },
         contiguousLabel() {
             try {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].shape == "rectangular") {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].shape == "rectangular") {
                     return "height";
                 }
                 else {
@@ -92,7 +93,7 @@ export default {
         },
         overlappingLabel() {
             try {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].shape == "rectangular") {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].shape == "rectangular") {
                     return "width";
                 }
                 else {
@@ -111,6 +112,13 @@ export default {
         windingDoesNotFit() {
             const f = this.fillingFactors;
             if (f == null) return false;
+            // ABT #245: the engine now decides this and reports it as windingFits, so
+            // the displayed areaFillingFactor can be the true area fraction instead of
+            // doubling as an overfill ratio (a degenerate section used to make it read
+            // 6077 % for a winding that was 2.35 % full).
+            if (f.windingFits != null) return !f.windingFits;
+            // Older embedded engines (consumer apps ship their own WASM) do not send
+            // windingFits — fall back to the pre-#245 test, which gave the same verdict.
             if (f.areaFillingFactor > 1) return true;
             if (this.sectionsOrientation == 'contiguous' && f.contiguousFillingFactor > 1) return true;
             if (this.sectionsOrientation == 'overlapping' && f.overlappingFillingFactor > 1) return true;
@@ -329,7 +337,12 @@ export default {
                 // for coils that have turns but not layers (e.g. between wire
                 // assignment and full Coil::process()).
                 const coil = this.masStore.mas.magnetic.coil;
-                const coilReady = coil.turnsDescription != null && coil.layersDescription != null;
+                // The core's processed description is cleared while the core is being
+                // (re)processed; MKF reads the effective area from it, and simulating
+                // without it divides the flux by 0 ("Waveform data contains NaN"). The
+                // coreProcessed event simulates again once it is back.
+                const coreReady = this.masStore.mas.magnetic.core?.processedDescription?.effectiveParameters != null;
+                const coilReady = coreReady && coil.turnsDescription != null && coil.layersDescription != null;
                 if (coilReady && (inputsString != this.lastSimulatedInputs || magneticsString != this.lastSimulatedMagnetics || modelsString != this.lastSimulatedModels)) {
 
                     this.taskQueueStore.simulate(this.masStore.mas, modelsData).then((mas) => {
@@ -352,6 +365,13 @@ export default {
                         console.error('[CoilInfo] Simulation error:', error);
                         this.loading = false;
                     });
+                }
+                else if (!coilReady) {
+                    // Core or coil still being processed: the shown values are not
+                    // for this design yet. The coreProcessed / wound event that ends
+                    // the processing simulates again.
+                    this.dataUptoDate = false;
+                    this.loading = false;
                 }
                 else {
                     // Inputs match the last successful simulation — the shown
@@ -827,8 +847,8 @@ export default {
 
 <style scoped>
 .coilinfo-panel {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.2);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 6%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);
     border-radius: 14px;
     padding: 0;
     margin: 0.05rem 0 0.5rem 0;
@@ -841,8 +861,8 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem 1rem;
-    background: rgba(120, 120, 120, 0.1);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.92rem;
     color: var(--p-primary);

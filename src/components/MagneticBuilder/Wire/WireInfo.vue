@@ -1,6 +1,7 @@
 <script setup>
 import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.vue'
 import { wireMaterialDefault } from '/WebSharedComponents/assets/js/defaults.js'
+import { effectiveBobbin } from '/WebSharedComponents/assets/js/utils.js'
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 </script>
@@ -79,16 +80,16 @@ export default {
         },
         fitsOuterDimensionsWidth() {
             if (this.masStore.mas.magnetic.coil.bobbin != "Dummy") {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].width != null) {
-                    if (this.outerDimensions[0] < this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].width) {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].width != null) {
+                    if (this.outerDimensions[0] < effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].width) {
                         return true;
                     }
                     else {
                         return false;
                     }
                 }
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].radialHeight != null) {
-                    if (this.outerDimensions[0] < this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].radialHeight / 2) {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].radialHeight != null) {
+                    if (this.outerDimensions[0] < effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].radialHeight / 2) {
                         return true;
                     }
                     else {
@@ -100,16 +101,16 @@ export default {
         },
         fitsOuterDimensionsHeight() {
             if (this.masStore.mas.magnetic.coil.bobbin != "Dummy") {
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].height != null) {
-                    if (this.outerDimensions[1] < this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].height) {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].height != null) {
+                    if (this.outerDimensions[1] < effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].height) {
                         return true;
                     }
                     else {
                         return false;
                     }
                 }
-                if (this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].radialHeight != null) {
-                    if (this.outerDimensions[0] < this.masStore.mas.magnetic.coil.bobbin.processedDescription.windingWindows[0].radialHeight / 2) {
+                if (effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].radialHeight != null) {
+                    if (this.outerDimensions[0] < effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].radialHeight / 2) {
                         return true;
                     }
                     else {
@@ -579,8 +580,8 @@ export default {
 
 <style scoped>
 .wireinfo-panel {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.2);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 6%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);
     border-radius: 14px;
     padding: 0;
     margin: 0.05rem 0 0.5rem 0;
@@ -593,8 +594,8 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.6rem 0.9rem;
-    background: rgba(120, 120, 120, 0.1);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.9rem;
     color: var(--p-primary);

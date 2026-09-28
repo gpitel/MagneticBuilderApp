@@ -11,6 +11,14 @@ import { defaultOperatingConditions } from '/WebSharedComponents/assets/js/defau
 
 export default {
     props: {
+        /**
+         * Compact: the chart drops its own title and toolbox and uses a shorter
+         * box, for a panel whose header already names it (ABT #1121).
+         */
+        compact: {
+            type: Boolean,
+            default: false,
+        },
         dataTestLabel: {
             type: String,
             default: '',
@@ -192,22 +200,26 @@ export default {
 <template>
     <div class="graph-wrapper">
         <div class="grid">
-            <div class="col-12 md:col-3">
+            <div v-if="$slots.default" class="col-12 md:col-3">
                 <div class="graph-params">
                     <slot/>
                 </div>
             </div>
-            <div class="col-12 md:col-9 graph-viz-col">
+            <div :class="$slots.default ? 'col-12 md:col-9 graph-viz-col' : 'col-12 graph-viz-col'">
                 <img :data-cy="dataTestLabel + '-CoreLossesOverFrequency-loading'" v-if="loading" class="mx-auto d-block graph-loading" alt="loading" :src="$settingsStore.loadingGif">
                 <LineVisualizer 
                     v-show="!loading"
                     :data="lossesOverFrequencyData"
                     :xAxisOptions="frequencyData"
-                    :title="'Core Losses over Frequency'"
+                    :title="compact ? '' : 'Core Losses over Frequency'"
+                    :toolbox="!compact"
+                    :chartStyle="compact ? 'height: 8rem' : 'height: 50vh'"
+                    :chartPaddings="compact ? { top: 16, left: 62, right: '5%', bottom: 30 } : { top: 60, left: 60, right: '5%', bottom: 30 }"
                     :forceUpdate="forceUpdate"
                     :bgColor="$styleStore.magneticBuilder.graphBgColor['background-color']"
                     :lineColor="$styleStore.magneticBuilder.graphLineColor.color"
                     :showPoints="false"
+                    :showLegend="!compact"
                     :tooltipTrigger="'axis'"
                     :pointsColor="$styleStore.magneticBuilder.graphPointsColor.color"
                     :textColor="$styleStore.magneticBuilder.inputTextColor.color"

@@ -98,6 +98,14 @@ export default {
             },
         },
     },
+    watch: {
+        'masStore.mas.magnetic.core.processedDescription.effectiveParameters': {
+            deep: true,
+            handler() {
+                this.syncEffectiveParametersFromStore();
+            },
+        },
+    },
     mounted () {
         this.subscriptions.push(this.taskQueueStore.$onAction(({name, args, after}) => {
             after(() => {
@@ -168,11 +176,13 @@ export default {
             });
         }))
 
-        // Populate coreEffectiveParameters from existing processedDescription on mount
-        const existingEffParams = this.masStore.mas.magnetic.core?.processedDescription?.effectiveParameters;
-        if (existingEffParams) {
-            this.coreEffectiveParameters = existingEffParams;
-        }
+        // The effective parameters come from the store, not only from the
+        // coreProcessed event: this panel can be mounted after the core was
+        // processed (a layout switch remounts it) or miss the event while it is
+        // being rebuilt, and latching on the event alone left it BLANK with a
+        // perfectly good core selected (ABT #1121). The watcher below keeps it in
+        // step; this is the first read.
+        this.syncEffectiveParametersFromStore();
 
         // Auto-simulate on mount if valid data exists (e.g., after navigating back from file load)
         if (this.enableAutoSimulation) {
@@ -192,6 +202,13 @@ export default {
         this.subscriptions.forEach((subscription) => {subscription();})
     },
     methods: {
+        /** Take the engine's processed parameters for the core now in the store. */
+        syncEffectiveParametersFromStore() {
+            const stored = this.masStore.mas?.magnetic?.core?.processedDescription?.effectiveParameters;
+            if (stored?.effectiveLength != null) {
+                this.coreEffectiveParameters = stored;
+            }
+        },
         calculateCoreLosses() {
             // Check if there are pending simulation models from the state store
             const pendingModels = this.$stateStore.pendingSimulationModels;
@@ -391,6 +408,26 @@ export default {
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
                         />
                     </div>
+                    <div class="coreinfo-cell" v-if="coreTemperatureDependantParametersData.mass != null && !Number.isNaN(coreTemperatureDependantParametersData.mass)">
+                        <DimensionReadOnly 
+                            v-tooltip="tooltipsMagneticBuilder.coreMass"
+                            class="text-left"
+                            :name="'Mass'"
+                            :unit="'g'"
+                            :power="1"
+                            :dataTestLabel="dataTestLabel + '-Mass'"
+                            :numberDecimals="1"
+                            :value="coreTemperatureDependantParametersData.mass * 1000"
+                            :disableShortenLabels="true"
+                            :labelWidthProportionClass="'col-3'"
+                            :valueWidthProportionClass="'col-9'"
+                            :valueFontSize="$styleStore.magneticBuilder.infoValueFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.infoLabelFontSize"
+                            :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
+                            :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                            :textColor="$styleStore.magneticBuilder.inputTextColor"
+                        />
+                    </div>
                     <div class="coreinfo-cell">
                         <DimensionReadOnly 
                             v-tooltip="tooltipsMagneticBuilder.permeance"
@@ -523,6 +560,12 @@ export default {
                         />
                     </div>
                 </div>
+                <p
+                    v-else
+                    :data-cy="dataTestLabel + '-CoreInfo-notProcessed'"
+                    class="coreinfo-empty"
+                >The core's numbers appear once the engine has processed it. If this stays empty,
+                the shape and material together could not be built — try another pairing.</p>
             </template>
             <template v-else>
                 <div class="coreinfo-simple" :class="{ 'coreinfo-dimmed': !dataUptoDate }" v-if="coreEffectiveParameters.effectiveLength != null">
@@ -586,6 +629,12 @@ export default {
                         :textColor="closeOrOverSaturation? $styleStore.magneticBuilder.inputLabelDangerBgColor : $styleStore.magneticBuilder.inputTextColor"
                     />
                 </div>
+                <p
+                    v-else
+                    :data-cy="dataTestLabel + '-CoreInfo-notProcessed'"
+                    class="coreinfo-empty"
+                >The core's numbers appear once the engine has processed it. If this stays empty,
+                the shape and material together could not be built — try another pairing.</p>
             </template>
         </div>
     </div>
@@ -593,8 +642,8 @@ export default {
 
 <style scoped>
 .coreinfo-panel {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.06) 0%, rgba(120, 120, 120, 0.02) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.2);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 6%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);
     border-radius: 14px;
     padding: 0;
     margin: 0.05rem 0 0.5rem 0;
@@ -607,8 +656,8 @@ export default {
     align-items: center;
     justify-content: space-between;
     padding: 0.6rem 0.9rem;
-    background: rgba(120, 120, 120, 0.1);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.9rem;
     color: var(--p-primary);
@@ -640,6 +689,14 @@ export default {
 
 .coreinfo-body {
     padding: 0.2rem 0.4rem;
+}
+
+.coreinfo-empty {
+    color: var(--p-gray-400);
+    font-size: 0.8rem;
+    margin: 0;
+    padding: 0.9rem 0.4rem;
+    text-align: center;
 }
 
 .coreinfo-grid {

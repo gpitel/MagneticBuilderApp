@@ -13,7 +13,7 @@ import { useSettingsStore } from '/src/stores/settings'
 import { useStateStore } from '/src/stores/state'
 import { VueWindowSizePlugin } from 'vue-window-size/plugin';
 import { useStyleStore } from '/src/stores/style'
-import { initWorker } from '/WebSharedComponents/assets/js/mkfRuntime'
+import { initWorker, applyRealWindingGeometrySetting } from '/WebSharedComponents/assets/js/mkfRuntime'
 import VueLatex from 'vatex'
 import { checkAndClearOutdatedStores, getVersionedWasmUrl } from '/src/stores/storeVersioning'
 
@@ -90,6 +90,12 @@ router.beforeEach((to, from, next) => {
                     const wasmJsUrl = getVersionedWasmUrl('/wasm/libMKF.wasm.js');
                     const mkf = await initWorker(wasmJsUrl);
                     app.config.globalProperties.$mkf = mkf;
+
+                    // Real winding BEFORE the first wind: the painter draws the turns it
+                    // is handed and never re-winds, so a coil wound while this was off is
+                    // painted as idealised rings whatever the flag says at plot time.
+                    await applyRealWindingGeometrySetting(
+                        mkf, useSettingsStore().magneticBuilderSettings.useRealWindingGeometry);
 
                     // Load materials, shapes, and wires in the background (non-blocking)
                     if (loadAllParts) {

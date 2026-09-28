@@ -24,7 +24,21 @@ export default {
             type: Boolean,
             default: true,
         },
+        /** Parent decides (core gappable, turns known, target inductance present). */
+        allowGapAdjust: {
+            type: Boolean,
+            default: false,
+        },
+        allowTurnsAdjust: {
+            type: Boolean,
+            default: false,
+        },
+        busy: {
+            type: Boolean,
+            default: false,
+        },
     },
+    emits: ['customizeCore', 'loadCore', 'adjustGapToInductance', 'adjustTurnsToInductance'],
     data() {
         return {
         }
@@ -66,6 +80,28 @@ export default {
             @click="$emit('customizeCore')"
         >
             <i class="pi pi-sliders-h mr-2"></i>Customize
+        </button>
+        <button
+            :disabled="!allowGapAdjust || busy"
+            :data-cy="dataTestLabel + '-Core-GapToInductance-button'"
+            class="mb-btn mb-btn-outline"
+            v-tooltip="allowGapAdjust
+                ? 'Set the gap so this core reaches the required magnetizing inductance with the turns you have'
+                : 'Needs a gappable core (two-piece set), a primary with turns and a magnetizing inductance requirement'"
+            @click="$emit('adjustGapToInductance')"
+        >
+            <i class="pi pi-arrows-v mr-2"></i>Gap for inductance
+        </button>
+        <button
+            :disabled="!allowTurnsAdjust || busy"
+            :data-cy="dataTestLabel + '-Core-TurnsToInductance-button'"
+            class="mb-btn mb-btn-outline"
+            v-tooltip="allowTurnsAdjust
+                ? 'Set the number of turns so this core, with its current gap, reaches the required magnetizing inductance'
+                : 'Needs a complete core and a magnetizing inductance requirement'"
+            @click="$emit('adjustTurnsToInductance')"
+        >
+            <i class="pi pi-replay mr-2"></i>Turns for inductance
         </button>
     </div>
 </template>
@@ -110,35 +146,35 @@ export default {
     background: linear-gradient(135deg,
         color-mix(in srgb, var(--p-primary) 115%, transparent 0%) 0%,
         var(--p-primary) 55%,
-        rgb(var(--p-primary-rgb) / 0.85) 100%);
+        rgba(var(--p-primary-rgb), 0.85) 100%);
     color: var(--p-white);
     border: 2px solid color-mix(in srgb, var(--p-primary) 70%, var(--p-white) 30%);
     box-shadow:
-        0 0 0 2px rgb(var(--p-primary-rgb) / 0.35),
-        0 4px 14px rgb(var(--p-primary-rgb) / 0.5),
+        0 0 0 2px rgba(var(--p-primary-rgb), 0.35),
+        0 4px 14px rgba(var(--p-primary-rgb), 0.5),
         inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
     text-shadow: 0 1px 2px rgba(var(--p-black-rgb), 0.25);
 }
 
 .mb-btn-primary:not(:disabled):hover {
     box-shadow:
-        0 0 0 2px rgb(var(--p-primary-rgb) / 0.35),
-        0 6px 20px rgb(var(--p-primary-rgb) / 0.6),
+        0 0 0 2px rgba(var(--p-primary-rgb), 0.35),
+        0 6px 20px rgba(var(--p-primary-rgb), 0.6),
         inset 0 1px 0 rgba(var(--p-white-rgb), 0.3);
 }
 
 /* OUTLINE — strong tinted bg, clear border */
 .mb-btn-outline {
-    background: rgb(var(--p-primary-rgb) / 0.2);
-    border: 1px solid rgb(var(--p-primary-rgb) / 0.55);
+    background: rgba(var(--p-primary-rgb), 0.2);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.55);
     color: var(--p-primary);
     box-shadow: 0 2px 6px rgba(var(--p-black-rgb), 0.2);
 }
 
 .mb-btn-outline:not(:disabled):hover {
-    background: rgb(var(--p-primary-rgb) / 0.3);
-    border-color: rgb(var(--p-primary-rgb) / 0.75);
-    box-shadow: 0 3px 10px rgb(var(--p-primary-rgb) / 0.25);
+    background: rgba(var(--p-primary-rgb), 0.3);
+    border-color: rgba(var(--p-primary-rgb), 0.75);
+    box-shadow: 0 3px 10px rgba(var(--p-primary-rgb), 0.25);
 }
 
 /* GHOST — still visible, lighter weight */

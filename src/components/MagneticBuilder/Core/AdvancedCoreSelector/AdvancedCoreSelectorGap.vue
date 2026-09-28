@@ -4,6 +4,7 @@ import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
 import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
 import { useTaskQueueStore } from '../../../../stores/taskQueue'
+import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
 
 </script>
 

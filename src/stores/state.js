@@ -349,12 +349,19 @@ export const useStateStore = defineStore("state", () => {
             modePerPoint: [null],
         };
 
+        // Must mirror the graphParameters ref() above key-for-key: any key missing
+        // here is undefined after a reset, and Dimension then silently falls back
+        // to its :defaultValue — a number the user never chose.
         this.graphParameters = {
             graph: 'impedanceOverFrequency',
             xAxisMode: 'log',
             yAxisMode: 'log',
             minimumFrequency: 1e3,
             maximumFrequency: 1e8,
+            minimumTemperature: -40,
+            maximumTemperature: 150,
+            minimumDcBias: 0,
+            maximumDcBias: 25,
             numberPoints: 100,
         };
 

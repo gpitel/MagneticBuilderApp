@@ -811,8 +811,14 @@ export default {
                             } else {
                                 try {
                                     console.log('[AdvancedCoilInfo] Calculating full capacitance data...');
+                                    // ABT #848 follow-up: hand the MAGNETIC, not the coil.
+                                    // The turn-to-core network is most of the winding-to-core
+                                    // capacitance, and without the core the panel could not
+                                    // see it at all — it disagreed with the impedance sweep by
+                                    // construction. Falls back to the coil if there is no
+                                    // magnetic, which is what the binding accepts anyway.
                                     const capacitanceData = await this.taskQueueStore.calculateStrayCapacitance(
-                                        coil,
+                                        this.masStore.mas?.magnetic ?? coil,
                                         operatingPoint,
                                         modelsData
                                     );
@@ -904,6 +910,12 @@ export default {
             return matrix;
         },
         
+        // Web bug report #176. Mirrors what the host's Actions-panel Close does, so
+        // both routes out of this view go through the same store action.
+        closeAdvancedView() {
+            this.$stateStore.closeCoilAdvancedInfo();
+        },
+
         // Winding selection methods
         initializeWindingSelection() {
             // Called on: new design, wizard usage, MAS load
@@ -966,6 +978,27 @@ export default {
 
 <template>
     <div class="advancedcoil-wrapper">
+        <!-- Web bug report #176: "Once entering Advanced parasitics you get stuck
+             there with no apparent way out". The exit existed, but only as a red
+             Close in the host's left Actions panel, which nobody associates with
+             leaving this view. Give the view its own way out. -->
+        <div class="advancedcoil-topbar">
+            <div class="advancedcoil-topbar-title">
+                <i class="pi pi-volume-up"></i>
+                <span>Advanced Parasitics</span>
+            </div>
+            <button
+                type="button"
+                class="advancedcoil-back-btn"
+                data-cy="AdvancedCoilInfo-close-button"
+                title="Back to the coil builder"
+                @click="closeAdvancedView"
+            >
+                <i class="pi pi-arrow-left"></i>
+                <span>Back to Coil</span>
+            </button>
+        </div>
+
         <div class="advancedcoil-grid" :class="{ 'advancedcoil-dimmed': !dataUptoDate }">
             <!-- Left Column: Resistance -->
             <div class="advancedcoil-card">
@@ -1117,6 +1150,21 @@ export default {
                 <div class="advancedcoil-card-header">
                     <i class="pi pi-wifi"></i>
                     <span>Stray Capacitance</span>
+                </div>
+                <!-- These are STATIC network capacitances. The capacitance implied by a
+                     self-resonance on the impedance curve is a different quantity and is
+                     smaller: along a winding the voltage distribution weights each
+                     turn-to-turn contribution by (dV/V)^2, so a distributed inter-turn
+                     capacitance contributes far less than its static value (a uniform
+                     single layer contributes about a third). A static-to-effective ratio
+                     of a few times is expected for a multi-layer winding and is not a
+                     disagreement between the two. Saying so here because I read the two
+                     numbers side by side and assumed one was wrong. -->
+                <div class="advancedcoil-hint advancedcoil-hint-note">
+                    <i class="pi pi-info-circle"></i>
+                    Static network capacitances. The effective capacitance at self-resonance
+                    is smaller — the voltage along the winding weights each contribution by
+                    (&Delta;V/V)&sup2;. Use the impedance sweep for resonance behaviour.
                 </div>
                 <div class="advancedcoil-card-body">
                     <div class="advancedcoil-plot">
@@ -1392,6 +1440,48 @@ export default {
 </template>
 
 <style scoped>
+.advancedcoil-hint-note {
+    display: block;
+    padding: 0.4rem 0.75rem 0;
+    line-height: 1.4;
+    opacity: 0.8;
+}
+
+.advancedcoil-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.advancedcoil-topbar-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    font-size: 1rem;
+    color: rgba(var(--p-white-rgb), 0.92);
+}
+
+.advancedcoil-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.8rem;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--p-primary-rgb), 0.55);
+    background: rgba(var(--p-primary-rgb), 0.12);
+    color: var(--p-primary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.advancedcoil-back-btn:hover {
+    background: rgba(var(--p-primary-rgb), 0.22);
+}
+
 .advancedcoil-wrapper {
     /* No top padding: align the parasitics cards with the normal MB config cards
        (same vertical start). The grid gap handles inter-card spacing. */
@@ -1416,8 +1506,8 @@ export default {
 }
 
 .advancedcoil-card {
-    background: linear-gradient(145deg, rgba(120, 120, 120, 0.05) 0%, rgba(120, 120, 120, 0.01) 100%);
-    border: 1px solid rgba(120, 120, 120, 0.12);
+    background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 5%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 1%, transparent) 100%);
+    border: 1px solid color-mix(in srgb, var(--p-gray-600) 12%, transparent);
     border-radius: 14px;
     overflow: hidden;
     box-shadow: 0 4px 20px rgba(var(--p-black-rgb), 0.12), inset 0 1px 0 rgba(var(--p-white-rgb), 0.04);
@@ -1428,8 +1518,8 @@ export default {
     align-items: center;
     gap: 0.6rem;
     padding: 0.75rem 1rem;
-    background: rgba(120, 120, 120, 0.1);
-    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    background: color-mix(in srgb, var(--p-gray-600) 10%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--p-gray-600) 15%, transparent);
     font-weight: 600;
     font-size: 0.95rem;
     color: var(--p-primary);

@@ -1,5 +1,6 @@
 import { defineStore, getActivePinia } from 'pinia'
 import { ref, watch } from 'vue'
+import { coreLossesModelDefault, coreTemperatureModelDefault } from '/WebSharedComponents/assets/js/defaults.js'
 
 // Helper to convert array of strings to dictionary (key=value)
 function arrayToDict(arr) {
@@ -117,8 +118,11 @@ export const useModelSettingsStore = defineStore("modelSettings", () => {
             } else if (reluctanceOptions.length > 0) {
                 reluctanceModel.value = reluctanceOptions[0]
             }
+            // These two round-trip through WASM in ITS representation (unlike the models above,
+            // which are name<->index mapped here), so they are stored raw — saveToWASM writes them
+            // straight back and set_settings rejects anything else. Consumers that need a NAME must
+            // resolve one themselves; see the resimulate payload below (ABT #913).
             if (settings.coreLossesModel !== undefined) {
-                // Core losses model depends on available methods
                 coreLossesModel.value = settings.coreLossesModel
             }
             if (settings.coreTemperatureModel !== undefined) {
@@ -238,12 +242,19 @@ export const useModelSettingsStore = defineStore("modelSettings", () => {
                     const stateStore = pinia._s.get('state')
                     if (stateStore && stateStore.resimulate) {
                         // Pass current model values to ensure they're used in simulation
+                        // Never ship a null/blank model NAME to a consumer: MKF throws
+                        // "type must be string, but is null" on one and takes the whole simulation
+                        // with it, leaving the UI showing zeros with no explanation (ABT #913).
+                        // These two refs hold WASM's own representation, which is not a name, so
+                        // fall back to the documented default whenever it is not a usable string.
+                        const named = (v, fallback) =>
+                            (typeof v === 'string' && v !== '') ? v : fallback
                         const currentModels = {
                             magneticFieldStrengthModel: magneticFieldStrengthModel.value,
                             magneticFieldStrengthFringingEffectModel: magneticFieldStrengthFringingEffectModel.value,
                             reluctanceModel: reluctanceModel.value,
-                            coreLossesModel: coreLossesModel.value,
-                            coreTemperatureModel: coreTemperatureModel.value,
+                            coreLossesModel: named(coreLossesModel.value, coreLossesModelDefault),
+                            coreTemperatureModel: named(coreTemperatureModel.value, coreTemperatureModelDefault),
                             coreThermalResistanceModel: coreThermalResistanceModel.value,
                             windingSkinEffectLossesModel: windingSkinEffectLossesModel.value,
                             windingProximityEffectLossesModel: windingProximityEffectLossesModel.value,

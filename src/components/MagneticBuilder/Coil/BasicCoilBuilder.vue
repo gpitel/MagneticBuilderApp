@@ -7,7 +7,13 @@ import { useTaskQueueStore } from '../../../stores/taskQueue'
 
 <script>
 export default {
+    emits: ['fillingFactorsChanged'],
     props: {
+        /** Passed through: a layout may place the coil's numbers elsewhere. */
+        showInfoPanel: {
+            type: Boolean,
+            default: true,
+        },
         dataTestLabel: {
             type: String,
             default: '',
@@ -66,8 +72,10 @@ export default {
         const retries = 0;
         const forceUpdate = 0;
         const subscriptions = [];
+        const plotError = '';
 
         return {
+            plotError,
             taskQueueStore,
             coilFits,
             imageUpToDate,
@@ -197,8 +205,20 @@ export default {
         fits(coilFits) {
             this.coilFits = coilFits;
         },
-        errorInImage() {
+        errorInImage(message) {
             this.imageUpToDate = false;
+
+            // Web bug reports #165 / #167. This used to retry every failure on a 1 s timer.
+            // For a transient one (the plot fired before the turns existed) that is right;
+            // for a deterministic engine refusal -- a wire the thermal model cannot read,
+            // say -- it re-runs the same doomed call once a second and the app feels like
+            // it is hanging, which is exactly what both reporters described. A failure that
+            // came with a reason is not going to fix itself, so stop retrying it.
+            if (message) {
+                this.plotError = String(message);
+                return;
+            }
+            this.plotError = '';
 
             if (this.retries > 0) {
                 if (this._retryTimer) clearTimeout(this._retryTimer);
@@ -220,6 +240,8 @@ export default {
     <div v-if="!missingWires && masStore.mas.magnetic.core != null && masStore.mas.magnetic.core.functionalDescription.shape != ''" class="container">
         <div class="row">
             <BasicCoilSelector
+                :showInfoPanel="showInfoPanel"
+                @fillingFactorsChanged="$emit('fillingFactorsChanged', $event)"
                 v-if="(masStore.mas.inputs.designRequirements.wiringTechnology == null || masStore.mas.inputs.designRequirements.wiringTechnology.toLowerCase() == 'wound')"
                 :masStore="masStore"
                 :readOnly="readOnly"

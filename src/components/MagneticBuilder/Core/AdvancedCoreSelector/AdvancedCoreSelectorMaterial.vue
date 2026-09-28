@@ -52,6 +52,9 @@ export default {
     watch: { 
     },
     created () {
+        if (typeof(this.core.functionalDescription.material) == "object") {
+            this.normalizeInitialPermeability(this.core.functionalDescription.material);
+        }
     },
     mounted () {
         this.subscriptions.push(this.taskQueueStore.$onAction(({name, args, after}) => {
@@ -59,6 +62,7 @@ export default {
                 if (name == "coreMaterialProcessed") {
                     if (args[0]) {
                         const coreMaterial = args[1];
+                        this.normalizeInitialPermeability(coreMaterial);
                         this.core.functionalDescription.material = coreMaterial;
                         // Do not call loadAdvancedMaterialData() — that would re-trigger
                         // processCoreMaterial and loop. Just load complex permeability if needed.
@@ -176,6 +180,21 @@ export default {
         },
     },
     methods: {
+        // MAS lets permeability.initial be ONE point instead of a list (the Magnetics
+        // tape-wound grades carry a single datasheet value: Amorphous 4000 at 10 kHz, 25 degC).
+        // The curve editors below index it as a list, so a lone point showed as "Property is
+        // missing" and "Add values" pushed onto an object. A one-point list is the same data.
+        // Equation-based permeability (a point with modifiers) is a different form: left alone.
+        normalizeInitialPermeability(material) {
+            const initial = material?.permeability?.initial;
+            if (initial == null || Array.isArray(initial) || typeof(initial) != "object") {
+                return;
+            }
+            if (initial.modifiers?.default?.method != null) {
+                return;
+            }
+            material.permeability.initial = [initial];
+        },
         loadAdvancedMaterialData() {
             const material = this.core.functionalDescription.material;
 

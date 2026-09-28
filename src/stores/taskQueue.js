@@ -4,6 +4,7 @@ import { checkAndFixMas, clean, toTitleCase, deepCopy } from '/WebSharedComponen
 import { wireMaterialDefault } from '/WebSharedComponents/assets/js/defaults.js'
 import { Convert as MasConvert } from '/WebSharedComponents/assets/ts/MAS.ts'
 import { useSettingsStore } from './settings'
+import { unitSystem } from '/WebSharedComponents/assets/js/units.js'
 import { useInventoryStore } from './inventory'
 
 // Returns the restricted shape-family whitelist (lowercase) if set in
@@ -20,6 +21,34 @@ function getRestrictedShapeFamilies() {
     }
 }
 
+// ABT #359: families MKF supports but the web UI does not surface yet — defined ONCE,
+// matched EXACTLY (the old inline `.includes("h")` substring checks collaterally hid any
+// family whose code contains an 'h', and the same 5-term condition was pasted five times).
+// pqi/ut/ui/h await their UI work; the drum-era families (drum, drumRing, drumSemishielded)
+// and molded await the 3D/preview path (MVB.js drawing + WASM bump) — unhide them there.
+const UI_HIDDEN_SHAPE_FAMILIES = new Set(['pqi', 'ut', 'ui', 'h']);
+
+// drum, drumRing, drumSemishielded and molded came OFF this list once the 3D/preview path
+// this comment used to wait for actually landed: MVB++ has ShapeMolded and
+// ShapeDrumSemishielded, the 2D painter no longer draws a phantom bobbin for them, and the
+// engine bump is in. The catalogue is full of parts in these families, so hiding the family
+// while listing the parts was the inconsistency.
+//
+// A family is hidden only if it is not the family of the part being EDITED. The part's own
+// family is a fact about the part, not a catalogue choice: hiding it left the user looking at
+// a core with no family and no shape, and the custom-shape branch then indexed a key that was
+// never created — "Cannot read properties of undefined (reading 'unshift')", which rejected
+// getCoreShapes entirely and emptied BOTH dropdowns rather than just one.
+function isShapeFamilyHiddenInUi(shapeFamily, currentFamily = null) {
+    if (currentFamily != null && shapeFamily === currentFamily) return false;
+    return UI_HIDDEN_SHAPE_FAMILIES.has(shapeFamily);
+}
+
+// The shape family of the MAS being edited, or null when there is none yet.
+function shapeFamilyOf(mas) {
+    return mas?.magnetic?.core?.functionalDescription?.shape?.family ?? null;
+}
+
 // MAS sentry. Validates an outgoing payload against the generated MAS schema
 // (via quicktype's `Convert.to*`) before we hand it to the WASM. Loud failure
 // here is far cheaper to diagnose than a generic "Input JSON does not conform
@@ -31,41 +60,104 @@ function getRestrictedShapeFamilies() {
 //
 // We never silently downgrade — on failure we throw with the full quicktype
 // error message (which includes the offending field path).
-function masSentry(where, obj, kind = 'Mas') {
+// Sentry cleaner. Recursively strips object keys whose value is
+// `null`, `"null"`, or `undefined`. Quicktype's optional fields are
+// decoded as `u(undefined, ...)` and reject explicit `null`. We do NOT
+// strip empty arrays or empty objects: required array fields (e.g.
+// `outputs`) must remain present even when empty. Mutates its argument —
+// callers pass a throwaway deep copy.
+function stripNulls(v) {
+    if (Array.isArray(v)) {
+        for (const item of v) stripNulls(item);
+        return v;
+    }
+    if (v && typeof v === 'object') {
+        for (const k of Object.keys(v)) {
+            const val = v[k];
+            if (val === null || val === 'null' || val === undefined) {
+                delete v[k];
+            } else {
+                stripNulls(val);
+            }
+        }
+    }
+    return v;
+}
+
+// JSON Schema validator installed by the HOST app (ABT #1388). quicktype's
+// Convert.to* only checks types, enums and unknown keys; the real MAS schema
+// also has bounds, patterns, const and oneOf. Validating against it needs the
+// ajv library, which this package does not force on every host that embeds it:
+// the host installs it with setMasSchemaValidator(fn), where
+// fn(kind, obj, where) throws a specific error for an invalid document
+// (WebFrontend: WebSharedComponents/assets/js/masValidator.js assertValidMas).
+// A host that installs none keeps the type check, and is told so once.
+let masSchemaValidator = null;
+let warnedNoSchemaValidator = false;
+export function setMasSchemaValidator(fn) {
+    if (typeof fn !== 'function') {
+        throw new Error('setMasSchemaValidator: expected a function (kind, obj, where) that throws on an invalid MAS document');
+    }
+    masSchemaValidator = fn;
+}
+
+function checkMasDocument(where, kind, cleaned) {
+    if (masSchemaValidator) {
+        masSchemaValidator(kind, cleaned, where);
+        return;
+    }
+    if (!warnedNoSchemaValidator) {
+        warnedNoSchemaValidator = true;
+        // eslint-disable-next-line no-console
+        console.warn('[MAS sentry] no JSON Schema validator installed by the host (setMasSchemaValidator); '
+            + 'payloads are only type-checked against MAS.ts');
+    }
     const fn = MasConvert['to' + kind];
     if (typeof fn !== 'function') {
         throw new Error(`[MAS sentry @ ${where}] Unknown sentry kind "${kind}" (no Convert.to${kind} in MAS.ts)`);
     }
-    // Sentry-local cleaner. Recursively strips object keys whose value is
-    // `null`, `"null"`, or `undefined`. Quicktype's optional fields are
-    // decoded as `u(undefined, ...)` and reject explicit `null`. We do NOT
-    // strip empty arrays or empty objects: required array fields (e.g.
-    // `outputs`) must remain present even when empty.
-    function stripNulls(v) {
-        if (Array.isArray(v)) {
-            for (const item of v) stripNulls(item);
-            return v;
-        }
-        if (v && typeof v === 'object') {
-            for (const k of Object.keys(v)) {
-                const val = v[k];
-                if (val === null || val === 'null' || val === undefined) {
-                    delete v[k];
-                } else {
-                    stripNulls(val);
-                }
-            }
-        }
-        return v;
-    }
+    fn(JSON.stringify(cleaned));
+}
+
+function masSentry(where, obj, kind = 'Mas') {
     try {
         const cleaned = stripNulls(JSON.parse(JSON.stringify(obj)));
-        fn(JSON.stringify(cleaned));
+        checkMasDocument(where, kind, cleaned);
     } catch (e) {
         const msg = `[MAS sentry @ ${where}/${kind}] Frontend produced invalid payload: ${e.message}`;
         // eslint-disable-next-line no-console
         console.error(msg);
         throw new Error(msg);
+    }
+}
+
+// Quarantine schema-invalid outputs in a MAS the WASM handed back. MKF's
+// mas_autocomplete recomputes outputs, and on an inconsistent coil it can
+// emit a windingLosses missing its required total (MKF #246). If that lands
+// in the mas store, every later sentry-guarded whole-Mas call fails —
+// including the simulate that would replace the bad outputs — and the coil
+// panel wedges on the sentry error. Outputs are always recomputed live, so
+// drop them, but only when they are provably the problem: document invalid
+// with them, valid without.
+function quarantineInvalidReturnedOutputs(where, mas) {
+    if (!Array.isArray(mas?.outputs) || mas.outputs.length === 0) {
+        return mas;
+    }
+    try {
+        checkMasDocument(where, 'Mas', stripNulls(JSON.parse(JSON.stringify(mas))));
+        return mas;
+    } catch (originalError) {
+        try {
+            const probe = stripNulls(JSON.parse(JSON.stringify(mas)));
+            probe.outputs = [];
+            checkMasDocument(where, 'Mas', probe);
+        } catch (stillInvalid) {
+            return mas;
+        }
+        // eslint-disable-next-line no-console
+        console.warn(`[MAS sentry @ ${where}] WASM returned schema-invalid outputs — dropping them (simulation recomputes all outputs). Validation error: ${originalError.message}`);
+        mas.outputs = [];
+        return mas;
     }
 }
 
@@ -165,7 +257,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const sanitized = result.replace(/([{,\[:][ \t]*)(-?)\.(\d)/g, '$1$2' + '0.$3');
             let masResult;
             try {
-                masResult = JSON.parse(sanitized);
+                masResult = quarantineInvalidReturnedOutputs('masAutocomplete', JSON.parse(sanitized));
             } catch (parseErr) {
                 // eslint-disable-next-line no-console
                 console.error('[taskQueue] masAutocomplete: JSON.parse still failed after sanitization. First 500 chars of WASM output:', result.substring(0, 500));
@@ -222,9 +314,16 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            core.geometricalDescription = null;
-            core.processedDescription = null;
-            const coreResult = await mkf.calculate_core_data(JSON.stringify(core), false)
+            // Process a COPY and swap the results in at the end. Callers pass the
+            // store's live core; nulling its processed/geometrical description here
+            // and then awaiting the engine left a window in which the coil panel's
+            // simulation and the core-loss panel sent a core with no effective
+            // area — MKF answered "Waveform data contains NaN" (flux / area 0) and
+            // "cannot use at() with null" (ABT #1369 follow-up, 2026-09-24).
+            const request = deepCopy(core);
+            request.geometricalDescription = null;
+            request.processedDescription = null;
+            const coreResult = await mkf.calculate_core_data(JSON.stringify(request), false)
             if (coreResult.startsWith('Exception')) {
                 setTimeout(() => {this.coreProcessed(false, coreResult);}, this.task_standard_response_delay);
                 throw new Error(coreResult);
@@ -293,19 +392,21 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         coreShapeFamiliesGotten(success = true, dataOrMessage = '') {
         },
 
-        async getCoreShapeFamilies(wiringTechnology=null) {
+        async getCoreShapeFamilies(wiringTechnology=null, mas=null) {
             const mkf = await waitForMkf();
             await mkf.ready;
 
             let coreShapeFamilies = [];
             const allowed = getRestrictedShapeFamilies();
+            // Never hide the family of the part being edited (see isShapeFamilyHiddenInUi).
+            const currentFamily = shapeFamilyOf(mas);
 
-            const coreShapeFamiliesArr = toArray(await mkf.get_available_core_shape_families());
+            const coreShapeFamiliesArr = toArray(await mkf.get_supported_core_shape_families());
             for (const shapeFamily of coreShapeFamiliesArr) {
-                if (!shapeFamily.includes("pqi") && !shapeFamily.includes("ut") &&
-                    !shapeFamily.includes("ui") && !shapeFamily.includes("h") && !shapeFamily.includes("drum")) {
+                if (!isShapeFamilyHiddenInUi(shapeFamily, currentFamily)) {
                     if (wiringTechnology == null || wiringTechnology?.toLowerCase() === 'wound' || shapeFamily.toLowerCase() !== 't') {
-                        if (allowed != null && !allowed.includes(shapeFamily.toLowerCase())) continue;
+                        if (allowed != null && shapeFamily !== currentFamily &&
+                            !allowed.includes(shapeFamily.toLowerCase())) continue;
                         coreShapeFamilies.push(shapeFamily);
                     }
                 }
@@ -327,8 +428,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
 
             const coreShapeFamilSubtypesArr = toArray(await mkf.get_shape_family_subtypes(family));
             for (const shapeFamilySubtype of coreShapeFamilSubtypesArr) {
-                if (!shapeFamilySubtype.includes("pqi") && !shapeFamilySubtype.includes("ut") &&
-                    !shapeFamilySubtype.includes("ui") && !shapeFamilySubtype.includes("h") && !shapeFamilySubtype.includes("drum")) {
+                if (!isShapeFamilyHiddenInUi(shapeFamilySubtype)) {
                     availableFamilySubtypes.push(shapeFamilySubtype);
                 }
             }
@@ -375,17 +475,18 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             let coreShapeFamilies = [];
             const coreShapeNames = {};
             const allowed = getRestrictedShapeFamilies();
+            const currentFamily = shapeFamilyOf(mas);
 
-            const coreShapeFamiliesArr = toArray(await mkf.get_available_core_shape_families());
+            const coreShapeFamiliesArr = toArray(await mkf.get_supported_core_shape_families());
             for (const shapeFamily of coreShapeFamiliesArr) {
-                if (!shapeFamily.includes("pqi") && !shapeFamily.includes("ut") &&
-                    !shapeFamily.includes("ui") && !shapeFamily.includes("h") && !shapeFamily.includes("drum")) {
+                if (!isShapeFamilyHiddenInUi(shapeFamily, currentFamily)) {
                     // Exclude toroidal cores (T family) when in Planar/Printed mode
                     const isToroidal = shapeFamily.toLowerCase() === 't';
                     const isPlanarMode = mas.inputs.designRequirements.wiringTechnology != null &&
                                          mas.inputs.designRequirements.wiringTechnology?.toLowerCase() !== 'wound';
                     if (!(isToroidal && isPlanarMode)) {
-                        if (allowed != null && !allowed.includes(shapeFamily.toLowerCase())) continue;
+                        if (allowed != null && shapeFamily !== currentFamily &&
+                            !allowed.includes(shapeFamily.toLowerCase())) continue;
                         coreShapeFamilies.push(shapeFamily);
                     }
                 }
@@ -397,8 +498,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 const coreShapeNamesArr = toArray(await mkf.get_available_core_shapes_by_manufacturer(onlyManufacturer));
 
                 coreShapeFamilies.forEach((shapeFamily) => {
-                    if (!shapeFamily.includes("pqi") && !shapeFamily.includes("ut") &&
-                        !shapeFamily.includes("ui") && !shapeFamily.includes("h") && !shapeFamily.includes("drum")) {
+                    if (!isShapeFamilyHiddenInUi(shapeFamily, currentFamily)) {
 
 
                         coreShapeNames[shapeFamily] = [];
@@ -419,8 +519,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
             else {
                 for (const shapeFamily of coreShapeFamilies) {
-                    if (!shapeFamily.includes("pqi") && !shapeFamily.includes("ut") &&
-                        !shapeFamily.includes("ui") && !shapeFamily.includes("h") && !shapeFamily.includes("drum")) {
+                    if (!isShapeFamilyHiddenInUi(shapeFamily, currentFamily)) {
                         coreShapeNames[shapeFamily] = [];
                         // Pass the family name exactly as get_available_core_shape_families
                         // returned it. The CoreShapeFamily enum is case-sensitive
@@ -443,7 +542,15 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
 
             if (mas.magnetic.core.functionalDescription.shape.type == "custom") {
-                coreShapeNames[mas.magnetic.core.functionalDescription.shape.family].unshift(mas.magnetic.core.functionalDescription.shape.name);
+                const family = mas.magnetic.core.functionalDescription.shape.family;
+                // currentFamily is never hidden, so this key exists for every family the engine
+                // enumerates. It can still be absent if the engine does not know the family at
+                // all — an inline custom shape is still a real part, so list it under its own
+                // family rather than throwing on an index that was never created.
+                if (coreShapeNames[family] == null) {
+                    coreShapeNames[family] = [];
+                }
+                coreShapeNames[family].unshift(mas.magnetic.core.functionalDescription.shape.name);
             }
             setTimeout(() => {this.coreShapesGotten(true, coreShapeNames);}, this.task_standard_response_delay);
             return coreShapeNames;
@@ -452,7 +559,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         coreMaterialsGotten(success = true, dataOrMessage = '') {
         },
 
-        async getCoreMaterials(onlyManufacturer) {
+        async getCoreMaterials(onlyManufacturer, requireLossModel = false) {
             const mkf = await waitForMkf();
             await mkf.ready;
 
@@ -469,7 +576,14 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             for (const manufacturer of coreMaterialManufacturers) {
                 coreMaterialNames[manufacturer] = []
                 if (!(onlyManufacturer != '' && onlyManufacturer != null && manufacturer != onlyManufacturer)) {
-                    const coreMaterialNamesArr = toArray(await mkf.get_available_core_materials(manufacturer));
+                    // requireLossModel: power/filter designs must only offer materials
+                    // whose core losses the engine can compute — a material without any
+                    // loss method throws MODEL_NOT_AVAILABLE on every loss-dependent
+                    // step. CMC flows pass false: interference-suppression materials
+                    // are characterised by complex permeability only (ABT #401).
+                    const coreMaterialNamesArr = toArray(requireLossModel
+                        ? await mkf.get_available_core_materials_with_loss_model(manufacturer)
+                        : await mkf.get_available_core_materials(manufacturer));
                     for (const materialName of coreMaterialNamesArr) {
                         coreMaterialNames[manufacturer].push(materialName);
                     }
@@ -478,6 +592,55 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
             setTimeout(() => {this.coreMaterialsGotten(true, coreMaterialNames);}, 10);
             return coreMaterialNames;
+        },
+
+        /**
+         * Catalogue summary of every core material for the material table
+         * (ABT #1072): properties resolved by the engine at 25 °C / 100 °C and
+         * losses at the datasheet reference point (100 kHz, 100 mT, 100 °C).
+         * SI units; a property the record lacks is null with the reason in
+         * `missing`.
+         */
+        async getCoreMaterialsSummary() {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+            const result = await mkf.get_core_materials_summary(25, 100, 100000, 0.1, 100);
+            if (result.startsWith('Exception')) {
+                throw new Error(result);
+            }
+            return JSON.parse(result);
+        },
+
+        /**
+         * Gap that gives the required magnetizing inductance (from inputs'
+         * designRequirements) with the coil's current turns. Returns the core
+         * with the new gapping, processed. gappingType: "Ground" | "Spacer".
+         */
+        async calculateGappingFromNumberTurnsAndInductance(core, coil, inputs, gappingType, decimals, modelsData) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+            const result = await mkf.calculate_gapping_from_number_turns_and_inductance(
+                JSON.stringify(core), JSON.stringify(coil), JSON.stringify(inputs), gappingType, decimals, JSON.stringify(modelsData));
+            if (result.startsWith('Exception')) {
+                throw new Error(result);
+            }
+            return JSON.parse(result);
+        },
+
+        /**
+         * Primary turns that give the required magnetizing inductance with the
+         * core's current gapping. The engine reports failures as -1 (its message
+         * goes to the worker console), so that is turned into a thrown error here.
+         */
+        async calculateNumberTurnsFromGappingAndInductance(core, coil, inputs, modelsData) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+            const result = await mkf.calculate_number_turns_from_gapping_and_inductance(
+                JSON.stringify(core), JSON.stringify(coil), JSON.stringify(inputs), JSON.stringify(modelsData));
+            if (!(result > 0)) {
+                throw new Error('Exception: calculate_number_turns_from_gapping_and_inductance failed (worker returned ' + result + '); see the worker console for the engine message');
+            }
+            return result;
         },
 
         coreLossesCalculated(success = true, dataOrMessage = '') {
@@ -505,10 +668,16 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 coil.functionalDescription.length > 0 &&
                 coil.functionalDescription.some(w => w.numberTurns > 0);
             
+            // A core whose processed description is being (re)computed — a shape
+            // change clears it until processCore answers — is incomplete input like
+            // a missing shape: MKF reads the effective area from it. Skip; the
+            // coreProcessed event re-runs this once the core is processed.
+            const coreProcessed = magnetic.core?.processedDescription?.effectiveParameters != null;
+
             // Check all required fields (coil is optional - we'll skip inductance/loss calculations if missing)
             if (!hasValidShape || !material || material === '' || 
                 !gapping || !Array.isArray(gapping) ||
-                !operatingPoint || ambientTemperature == null) {
+                !operatingPoint || ambientTemperature == null || !coreProcessed) {
                 return null;
             }
             
@@ -648,6 +817,44 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         bobbinDifferentThicknessesGenerated(success = true, dataOrMessage = '') {
         },
 
+        async plotMagneticField(magnetic, operatingPoint) {
+            // Painter H-field map (SVG document) for the winding-studio overlay.
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const result = await mkf.plot_magnetic_field(JSON.stringify(magnetic), JSON.stringify(operatingPoint));
+            if (!result.startsWith('<')) {
+                throw new Error(result);
+            }
+            return result;
+        },
+
+        async calculateAutoProportions(coil) {
+            // The engine's automatic per-winding proportions (wire-area based) —
+            // what wind() uses when none are given. Backs the studio Auto-fit.
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const result = await mkf.calculate_proportion_per_winding_based_on_wires(JSON.stringify(coil));
+            if (result.startsWith("Exception")) {
+                throw new Error(result);
+            }
+            return JSON.parse(result);
+        },
+
+        async materializeBobbin(magnetic) {
+            // Resolve the magnetic's bobbin (typically a by-name catalog part)
+            // into the full processed bobbin object via the engine's database.
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const bobbinResult = await mkf.calculate_bobbin_data(JSON.stringify(magnetic));
+            if (bobbinResult.startsWith("Exception")) {
+                throw new Error(bobbinResult);
+            }
+            return JSON.parse(bobbinResult);
+        },
+
         async generateBobbinDifferentThicknesses(core, bobbinWallThickness, bobbinColumnThickness) {
             const mkf = await waitForMkf();
             await mkf.ready;
@@ -668,11 +875,60 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         coreAdvised(success = true, dataOrMessage = '') {
         },
 
+        /** Core-material manufacturers known to the engine (sorted). */
+        async getCoreManufacturers() {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+            return toArray(await mkf.get_available_core_manufacturers()).sort();
+        },
+
         async adviseCore(inputs, coreAdviserWeights, adviserSettings) {
+            let candidates;
+            try {
+                candidates = await this.adviseCoreCandidates(inputs, coreAdviserWeights, adviserSettings, 1);
+            }
+            catch (error) {
+                // Only the Advise button's own call announces a failed advise; the
+                // alternatives panel's background search reports its errors in the panel.
+                setTimeout(() => {this.coreAdvised(false, error.message);}, this.task_standard_response_delay);
+                throw error;
+            }
+            const magnetic = candidates[0].mas.magnetic;
+            setTimeout(() => {this.coreAdvised(true, magnetic);}, this.task_standard_response_delay);
+            return magnetic;
+        },
+
+        /**
+         * The core adviser's ranked candidates for these requirements — `count`
+         * of them, each an entry of the engine's `data` array with its scoring
+         * and its whole MAS (ABT #1121).
+         *
+         * adviseCore is this with count 1; the alternatives panel asks for more.
+         * Nothing here touches the design: the caller decides what to adopt.
+         */
+        async adviseCoreCandidates(inputs, coreAdviserWeights, adviserSettings, count = 1) {
             const mkf = await waitForMkf();
             await mkf.ready;
 
             const settings = JSON.parse(await mkf.get_settings());
+
+            // Preferred core manufacturer (ABT #1099): the adviser searches that
+            // maker's materials first (a tiebreak in MKF, never a gate — with
+            // no match it evaluates every material and says so). The engine's
+            // own defaults are remembered from the first call so clearing the
+            // preference restores them rather than a value guessed here.
+            if (this._engineDefaultPreferredManufacturers == null) {
+                if (!('preferredCoreMaterialFerriteManufacturer' in settings) || !('preferredCoreMaterialPowderManufacturer' in settings)) {
+                    throw new Error('Engine settings do not expose preferredCoreMaterial*Manufacturer: libMKF is older than the preferred-manufacturer feature (ABT #1099)');
+                }
+                this._engineDefaultPreferredManufacturers = {
+                    ferrite: settings.preferredCoreMaterialFerriteManufacturer,
+                    powder: settings.preferredCoreMaterialPowderManufacturer,
+                };
+            }
+            const preferredManufacturer = useSettingsStore().userPreferences?.preferredCoreManufacturer ?? null;
+            settings.preferredCoreMaterialFerriteManufacturer = preferredManufacturer ?? this._engineDefaultPreferredManufacturers.ferrite;
+            settings.preferredCoreMaterialPowderManufacturer = preferredManufacturer ?? this._engineDefaultPreferredManufacturers.powder;
 
             // CMC topology → force toroidal, no distributed gaps (winding goes around).
             const isCmc = inputs?.designRequirements?.topology?.toLowerCase() === 'commonmodechoke';
@@ -766,10 +1022,9 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
 
             masSentry('adviseCore', inputsClean, 'Inputs');
-            const result = await mkf.calculate_advised_cores(JSON.stringify(inputsClean), JSON.stringify(coreAdviserWeights), 1, coreAdviseMode);
+            const result = await mkf.calculate_advised_cores(JSON.stringify(inputsClean), JSON.stringify(coreAdviserWeights), count, coreAdviseMode);
 
             if (result.startsWith("Exception")) {
-                setTimeout(() => {this.coreAdvised(false, result);}, this.task_standard_response_delay);
                 throw new Error(result);
             }
 
@@ -780,9 +1035,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             try { if (typeof window !== 'undefined') window.__lastAdviseCoreRaw = aux; } catch (_) {}
 
             if (data.length > 0) {
-                const magnetic = data[0].mas.magnetic;
-                setTimeout(() => {this.coreAdvised(true, magnetic);}, this.task_standard_response_delay);
-                return magnetic;
+                return data;
             }
             else {
                 // Surface the MKF Core Adviser log so we can see WHY every
@@ -1156,6 +1409,11 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 if (typeof(wire.strand) == "string" || wire.strand == null || (wire.strand != null && wire.strand.coating == null)) {
                     wire.strand = JSON.parse(await mkf.get_wire_data_by_standard_name(newWireDataDict["litzStrandConductingDiameter"]));
                 }
+                // The strand's size names its standard ("0.1 mm" is IEC, "38 AWG" is NEMA);
+                // the litz inherits it (ABT #1110, the standard is no longer a user field).
+                if (wire.strand != null && wire.strand.standard != null) {
+                    wire.standard = wire.strand.standard;
+                }
                 wire.numberConductors = newWireDataDict["numberConductors"];
                 if (coating != null) {
                     if (wire.outerDiameter == null) {
@@ -1359,6 +1617,7 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         // WebFrontend the inventory store is the host's full implementation;
         // standalone MB keeps scope 'public' and always takes the classic path.
         async callCalculateAdvisedCoil(mkf, advisePayload) {
+            await this.applyPreferredWireStandard(mkf);
             const inventoryStore = useInventoryStore();
             if (inventoryStore.scope === 'only') {
                 if (!inventoryStore.engineContextLoaded) {
@@ -1370,6 +1629,37 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         },
 
         allWiresAdvised(success = true, dataOrMessage = '') {
+        },
+
+        /**
+         * The wire standard follows the profile unit system (ABT #1110): IEC 60317
+         * (millimetre sizes) under SI, NEMA MW 1000 C (AWG) under imperial. Pushed
+         * into the engine settings before any wire or coil advise, so the advisers
+         * only offer wires of that standard.
+         */
+        preferredWireStandard() {
+            return unitSystem() === 'imperial' ? 'NEMA MW 1000 C' : 'IEC 60317';
+        },
+        async applyPreferredWireStandard(mkf) {
+            const settings = JSON.parse(await mkf.get_settings());
+            if (!('preferredWireStandard' in settings)) {
+                throw new Error('Engine settings do not expose preferredWireStandard: libMKF is older than the wire-standard preference (ABT #1110)');
+            }
+            const wanted = this.preferredWireStandard();
+            if (settings.preferredWireStandard === wanted) return;
+            settings.preferredWireStandard = wanted;
+            await mkf.set_settings(JSON.stringify(settings));
+        },
+
+        /** Every catalogue wire, one summary row each (engine get_wires_summary, lengths in metres). */
+        async getWiresSummary() {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+            const result = await mkf.get_wires_summary();
+            if (result.startsWith('Exception')) {
+                throw new Error(result);
+            }
+            return JSON.parse(result);
         },
 
         async adviseAllWires(mas) {
@@ -1461,7 +1751,12 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
 
             // MAS sentry — validate before WASM round-trip. Catches schema
             // drift at the boundary with the exact bad field, not deep in C++.
-            masSentry('simulate', mas, 'Mas');
+            // Validate exactly what is sent: inputs + magnetic. Outputs never
+            // cross this boundary, and validating them wedged the panel — stale
+            // invalid outputs in the store blocked the very simulate call whose
+            // result would have replaced them.
+            masSentry('simulate', mas.inputs, 'Inputs');
+            masSentry('simulate', mas.magnetic, 'Magnetic');
 
             // Send the WASM the same null-stripped payload the sentry validates.
             // MKF's autocomplete emits explicit `null` for absent optionals, but
@@ -1550,11 +1845,22 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         wound(success = true, dataOrMessage = '') {
         },
 
-        async wind(inputCoil, repetitions, proportionPerWinding, pattern, margins) {
+        async wind(inputCoil, repetitions, proportionPerWinding, pattern, margins, coreColumns = null, customSectionRects = null, delimitAndCompact = true) {
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            const result = await mkf.wind(JSON.stringify(inputCoil), repetitions, JSON.stringify(proportionPerWinding), JSON.stringify(pattern), JSON.stringify(margins));
+            const hasCustomRects = customSectionRects != null && Object.keys(customSectionRects).length > 0;
+
+            // Multi-column placement (winding studio): windings/sections placed in
+            // non-main winding windows need the core columns to build their lateral
+            // wound-column frames, so pass them through whenever the caller has them
+            // (a no-op for main-column-only coils). Hand-drawn section rectangles
+            // are re-imposed by the engine after compaction, so drawn sections
+            // survive every re-wind; delimitAndCompact switches the compaction pass
+            // for the rest of the coil.
+            const result = coreColumns != null
+                ? await mkf.wind_with_columns(JSON.stringify(inputCoil), JSON.stringify(coreColumns), repetitions, JSON.stringify(proportionPerWinding), JSON.stringify(pattern), JSON.stringify(margins), hasCustomRects ? JSON.stringify(customSectionRects) : "", delimitAndCompact)
+                : await mkf.wind(JSON.stringify(inputCoil), repetitions, JSON.stringify(proportionPerWinding), JSON.stringify(pattern), JSON.stringify(margins));
 
             if (result.startsWith("Exception")) {
                 setTimeout(() => {this.wound(false, result);}, this.task_standard_response_delay);
@@ -1562,14 +1868,44 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
             else {
                 let coil = JSON.parse(result);
-                // Call delimit_and_compact to compact additional turns for toroidal coils
-                const compactResult = await mkf.delimit_and_compact(JSON.stringify(coil));
-                if (!compactResult.startsWith("Exception")) {
-                    coil = JSON.parse(compactResult);
+                // Call delimit_and_compact to compact additional turns for toroidal
+                // coils. Skipped when drawn rectangles exist or compaction is off:
+                // the wind call above already ran (or deliberately skipped) the
+                // compaction, and this standalone pass would move drawn sections.
+                if (!hasCustomRects && delimitAndCompact) {
+                    const compactResult = coreColumns != null
+                        ? await mkf.delimit_and_compact_with_columns(JSON.stringify(coil), JSON.stringify(coreColumns))
+                        : await mkf.delimit_and_compact(JSON.stringify(coil));
+                    if (!compactResult.startsWith("Exception")) {
+                        coil = JSON.parse(compactResult);
+                    }
                 }
                 setTimeout(() => {this.wound(true, coil);}, this.task_standard_response_delay);
                 return coil;
             }
+        },
+
+        layersAndTurnsRewound(success = true, dataOrMessage = '') {
+        },
+
+        async rewindLayersAndTurns(inputCoil, coreColumns = null) {
+            // Custom-rectangle re-flow (winding studio): layers+turns are re-run
+            // INSIDE the caller-provided section rectangles; sections are NOT
+            // recomputed and nothing re-compacts the custom placement.
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const result = await mkf.wind_layers_and_turns_with_columns(
+                JSON.stringify(inputCoil),
+                coreColumns != null ? JSON.stringify(coreColumns) : "");
+
+            if (result.startsWith("Exception")) {
+                setTimeout(() => {this.layersAndTurnsRewound(false, result);}, this.task_standard_response_delay);
+                throw new Error(result);
+            }
+            const coil = JSON.parse(result);
+            setTimeout(() => {this.layersAndTurnsRewound(true, coil);}, this.task_standard_response_delay);
+            return coil;
         },
 
         planarWound(success = true, dataOrMessage = '') {
@@ -2050,19 +2386,26 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         strayCapacitanceCalculated(success = true, dataOrMessage = '') {
         },
 
-        async calculateStrayCapacitance(coil, operatingPoint, modelsData = {}) {
+        // ABT #848 follow-up: takes the MAGNETIC, not the coil. The engine's turn-to-core
+        // network needs the core, and this binding used to be handed a bare coil, so the
+        // panel was structurally unable to see it and disagreed with the impedance sweep by
+        // construction. A bare coil still works (the binding detects it), so no caller
+        // breaks, but pass the magnetic when you have one.
+        async calculateStrayCapacitance(magneticOrCoil, operatingPoint, modelsData = {}) {
             const mkf = await waitForMkf();
             await mkf.ready;
 
+            const coil = magneticOrCoil?.coil ?? magneticOrCoil;
             console.log('📤 Sending to calculate_stray_capacitance:', {
                 coilKeys: Object.keys(coil),
                 turnsCount: coil.turnsDescription?.length || 0,
                 layersCount: coil.layersDescription?.length || 0,
                 windingsCount: coil.functionalDescription?.length || 0,
+                hasCore: !!magneticOrCoil?.core,
                 hasOperatingPoint: !!operatingPoint
             });
 
-            const result = await mkf.calculate_stray_capacitance(JSON.stringify(coil), JSON.stringify(operatingPoint), JSON.stringify(modelsData));
+            const result = await mkf.calculate_stray_capacitance(JSON.stringify(magneticOrCoil), JSON.stringify(operatingPoint), JSON.stringify(modelsData));
 
             if (result.startsWith("Exception")) {
                 console.error('❌ calculate_stray_capacitance Exception:', result);
@@ -2079,11 +2422,11 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         maxwellCapacitanceMatrixCalculated(success = true, dataOrMessage = '') {
         },
 
-        async calculateMaxwellCapacitanceMatrix(coil, modelsData = {}) {
+        async calculateMaxwellCapacitanceMatrix(magneticOrCoil, modelsData = {}) {
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            const result = await mkf.calculate_maxwell_capacitance_matrix(JSON.stringify(coil), JSON.stringify(modelsData));
+            const result = await mkf.calculate_maxwell_capacitance_matrix(JSON.stringify(magneticOrCoil), JSON.stringify(modelsData));
 
             if (result.startsWith("Exception")) {
                 setTimeout(() => {this.maxwellCapacitanceMatrixCalculated(false, result);}, this.task_standard_response_delay);
@@ -2099,11 +2442,11 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         capacitanceMatrixCalculated(success = true, dataOrMessage = '') {
         },
 
-        async calculateCapacitanceMatrix(coil, modelsData = {}) {
+        async calculateCapacitanceMatrix(magneticOrCoil, modelsData = {}) {
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            const result = await mkf.calculate_capacitance_matrix(JSON.stringify(coil), JSON.stringify(modelsData));
+            const result = await mkf.calculate_capacitance_matrix(JSON.stringify(magneticOrCoil), JSON.stringify(modelsData));
 
             if (result.startsWith("Exception")) {
                 setTimeout(() => {this.capacitanceMatrixCalculated(false, result);}, this.task_standard_response_delay);
