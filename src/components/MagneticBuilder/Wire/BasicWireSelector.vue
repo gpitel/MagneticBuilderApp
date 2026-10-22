@@ -175,6 +175,9 @@ export default {
         },
     },
     watch: {
+        loading(value) {
+            this.taskQueueStore.wireAdviseBusy = value;
+        },
         activeUnitSystem() {
             this.localData.standard = this.preferredWireStandard;
             this.getWireDiameters();
@@ -240,6 +243,7 @@ export default {
         }));
     },
     beforeUnmount () {
+        if (this.loading) this.taskQueueStore.wireAdviseBusy = false;
         this.subscriptions.forEach((subscription) => {subscription();})
     },
     methods: {
@@ -451,9 +455,11 @@ export default {
                     // Only update coil and trigger actions if not blocked
                     if (!this.taskQueueStore.windingIndexChangeBlock) {
                         this.masStore.mas.magnetic.coil.functionalDescription = coil.functionalDescription;
-                        // Preserve sections/turns layout from adviser (e.g. CMC spacers); only wipe if absent
+                        // Preserve sections/layers/turns layout from adviser (e.g. CMC spacers); only wipe if absent.
+                        // The layers carry the interlayer insulation, which cannot be rebuilt from sections and turns (ABT #1892)
                         if (coil.sectionsDescription) {
                             this.masStore.mas.magnetic.coil.sectionsDescription = coil.sectionsDescription;
+                            this.masStore.mas.magnetic.coil.layersDescription = coil.layersDescription ?? null;
                             this.masStore.mas.magnetic.coil.turnsDescription = coil.turnsDescription ?? null;
                             // Propagate bobbin sectionsOrientation so subsequent wind() calls
                             // inherit CONTIGUOUS for CMC toroids instead of resetting to OVERLAPPING
@@ -513,9 +519,11 @@ export default {
                     // Only update coil and trigger actions if not blocked
                     if (!this.taskQueueStore.windingIndexChangeBlock) {
                         this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex] = winding;
-                        // Preserve sections/turns layout from adviser (e.g. CMC spacers); only wipe if absent
+                        // Preserve sections/layers/turns layout from adviser (e.g. CMC spacers); only wipe if absent.
+                        // The layers carry the interlayer insulation, which cannot be rebuilt from sections and turns (ABT #1892)
                         if (result.coil?.sectionsDescription) {
                             this.masStore.mas.magnetic.coil.sectionsDescription = result.coil.sectionsDescription;
+                            this.masStore.mas.magnetic.coil.layersDescription = result.coil.layersDescription ?? null;
                             this.masStore.mas.magnetic.coil.turnsDescription = result.coil.turnsDescription ?? null;
                         } else {
                             this.cleanCoil();
@@ -611,7 +619,7 @@ export default {
                     <button
                         v-if="enableAdvise && enableSubmenu && masStore.mas.magnetic.coil.functionalDescription.length > 1"
                         type="button"
-                        :disabled="loading"
+                        :disabled="loading || taskQueueStore.coreAdviseBusy"
                         :data-cy="dataTestLabel + 'Wire-Advise-button'"
                         :class="['wire-config-header-btn', 'wire-config-header-btn-primary', { 'wire-config-header-btn-needs-attention': isCurrentWireIncomplete }]"
                         v-tooltip="isCurrentWireIncomplete ? 'Wire not configured for this winding — click to get a recommendation' : 'Get a recommended wire for this winding'"
@@ -623,7 +631,7 @@ export default {
                     <button
                         v-if="enableAdvise && enableSubmenu && masStore.mas.magnetic.coil.functionalDescription.length > 1"
                         type="button"
-                        :disabled="loading"
+                        :disabled="loading || taskQueueStore.coreAdviseBusy"
                         :data-cy="dataTestLabel + 'Wire-Advise-All-button'"
                         :class="['wire-config-header-btn', 'wire-config-header-btn-primary', { 'wire-config-header-btn-needs-attention': anyWireIncomplete }]"
                         v-tooltip="anyWireIncomplete ? 'Some wires are not configured — click to get a recommendation for every winding' : 'Get a recommendation for every winding'"
@@ -635,7 +643,7 @@ export default {
                     <button
                         v-if="enableAdvise && enableSubmenu && masStore.mas.magnetic.coil.functionalDescription.length == 1"
                         type="button"
-                        :disabled="loading"
+                        :disabled="loading || taskQueueStore.coreAdviseBusy"
                         :data-cy="dataTestLabel + 'Wire-Advise-button'"
                         :class="['wire-config-header-btn', 'wire-config-header-btn-primary', { 'wire-config-header-btn-needs-attention': isCurrentWireIncomplete }]"
                         v-tooltip="isCurrentWireIncomplete ? 'Wire not configured — click to get a recommendation' : 'Get a recommended wire'"

@@ -202,6 +202,9 @@ export default {
         },
     },
     watch: {
+        loading(value) {
+            this.taskQueueStore.coreAdviseBusy = value;
+        },
         // NOTE: previously watched `operatingPointIndex` and called
         // `processCore` here. That was wrong: operating point has no
         // effect on core geometry (shape / gapping / material), so the
@@ -339,6 +342,7 @@ export default {
 
     },
     beforeUnmount () {
+        if (this.loading) this.taskQueueStore.coreAdviseBusy = false;
         if (this._mountTimer) clearTimeout(this._mountTimer);
         this.subscriptions.forEach((subscription) => {subscription();})
     },
@@ -782,7 +786,7 @@ export default {
                     <button
                         v-if="enableAdvise && enableSubmenu"
                         type="button"
-                        :disabled="loading"
+                        :disabled="loading || taskQueueStore.wireAdviseBusy"
                         :data-cy="dataTestLabel + '-Core-Advise-button'"
                         :class="['core-config-header-btn', 'core-config-header-btn-primary', { 'core-config-header-btn-needs-attention': isCoreIncomplete }]"
                         v-tooltip="isCoreIncomplete ? 'Core not fully configured — click to get a recommended starting core' : 'Get a recommended core for these requirements'"

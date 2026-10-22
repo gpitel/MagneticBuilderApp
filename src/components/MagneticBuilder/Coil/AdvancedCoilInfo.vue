@@ -681,6 +681,14 @@ export default {
                 windingProximityEffectLosses: pendingModels?.windingProximityEffectLossesModel || this.modelSettingsStore.windingProximityEffectLossesModel,
             };
             
+            // The field-strength models are loaded from the engine asynchronously on first open; until
+            // they are, there is nothing to simulate with (MKF throws on a null model name). Their load
+            // resimulates, which runs this again.
+            if (!modelsData.magneticFieldStrength || !modelsData.magneticFieldStrengthFringingEffect) {
+                this.dataUptoDate = false;
+                return;
+            }
+
             // Check cache to avoid unnecessary recalculation
             const magneticsString = JSON.stringify(magnetic);
             const modelsString = JSON.stringify(modelsData);

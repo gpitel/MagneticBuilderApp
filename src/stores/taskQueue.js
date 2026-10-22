@@ -1,15 +1,22 @@
 import { defineStore } from 'pinia'
-import { waitForMkf, isWorkerMode } from '/WebSharedComponents/assets/js/mkfRuntime'
+import { waitForMkf, isWorkerMode, applyRealWindingGeometrySetting, updateEngineSettings, queueEngineSettingsTask } from '/WebSharedComponents/assets/js/mkfRuntime'
 import { checkAndFixMas, clean, toTitleCase, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
 import { wireMaterialDefault } from '/WebSharedComponents/assets/js/defaults.js'
 import { Convert as MasConvert } from '/WebSharedComponents/assets/ts/MAS.ts'
 import { useSettingsStore } from './settings'
 import { unitSystem } from '/WebSharedComponents/assets/js/units.js'
 import { useInventoryStore } from './inventory'
+import { requireAdviserExcitations, requireCoreAdviseMode } from '/WebSharedComponents/assets/js/adviserInputs.js'
 
 // Returns the restricted shape-family whitelist (lowercase) if set in
 // magneticBuilderSettings, or null when no restriction applies. Defensive
 // against the field being absent in older persisted settings blobs.
+// Two wire coatings build the same wire when type, grade and insulation layers match.
+function sameCoating(a, b) {
+    if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false;
+    return ['type', 'grade', 'numberLayers', 'thicknessLayers'].every((key) => (a[key] ?? null) === (b[key] ?? null));
+}
+
 function getRestrictedShapeFamilies() {
     try {
         const s = useSettingsStore();
@@ -192,6 +199,13 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         task_standard_response_delay: 20,
         windingIndexChangeBlock: false,
         bobbinRegenerationPending: false,
+        // An advise replaces part of the magnetic in several awaited steps, so the
+        // core and wire advisers must not overlap: a wire advise started while an
+        // advised core is being applied runs on a half-swapped coil ("Bobbin is
+        // dummy") or lands on top of the new core. Each panel mirrors its own
+        // advise into these flags and disables its Advise buttons on the other's.
+        coreAdviseBusy: false,
+        wireAdviseBusy: false,
         _windingBlockTimer: null,
         _windingChangedTimer: null,
     }),
@@ -910,119 +924,68 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            const settings = JSON.parse(await mkf.get_settings());
+            const coreAdviseMode = requireCoreAdviseMode(adviserSettings.coreAdviseMode);
 
-            // Preferred core manufacturer (ABT #1099): the adviser searches that
-            // maker's materials first (a tiebreak in MKF, never a gate — with
-            // no match it evaluates every material and says so). The engine's
-            // own defaults are remembered from the first call so clearing the
-            // preference restores them rather than a value guessed here.
-            if (this._engineDefaultPreferredManufacturers == null) {
-                if (!('preferredCoreMaterialFerriteManufacturer' in settings) || !('preferredCoreMaterialPowderManufacturer' in settings)) {
-                    throw new Error('Engine settings do not expose preferredCoreMaterial*Manufacturer: libMKF is older than the preferred-manufacturer feature (ABT #1099)');
-                }
-                this._engineDefaultPreferredManufacturers = {
-                    ferrite: settings.preferredCoreMaterialFerriteManufacturer,
-                    powder: settings.preferredCoreMaterialPowderManufacturer,
-                };
-            }
-            const preferredManufacturer = useSettingsStore().userPreferences?.preferredCoreManufacturer ?? null;
-            settings.preferredCoreMaterialFerriteManufacturer = preferredManufacturer ?? this._engineDefaultPreferredManufacturers.ferrite;
-            settings.preferredCoreMaterialPowderManufacturer = preferredManufacturer ?? this._engineDefaultPreferredManufacturers.powder;
-
-            // CMC topology → force toroidal, no distributed gaps (winding goes around).
-            const isCmc = inputs?.designRequirements?.topology?.toLowerCase() === 'commonmodechoke';
-
-            if (isCmc) {
-                settings["coreIncludeDistributedGaps"] = false;
-                settings["coreIncludeMargin"] = true;
-                settings["coreIncludeStacks"] = true;
-                settings["useToroidalCores"] = true;
-                settings["useConcentricCores"] = false;
-                settings["useOnlyCoresInStock"] = false;
-            }
-            else {
-                settings["coreIncludeDistributedGaps"] = adviserSettings.allowDistributedGaps;
-                settings["coreIncludeMargin"] = true;
-                settings["coreIncludeStacks"] = adviserSettings.allowStacks;
-                settings["useToroidalCores"] = adviserSettings.allowToroidalCores;
-                settings["useOnlyCoresInStock"] = false;
-            }
-            settings["coreAdviserEnableTemperatureFilter"] = adviserSettings.enableTemperatureFilter ?? false;
-            settings["coreAdviserMaximumTemperature"] = adviserSettings.maximumTemperature ?? 130;
-            await mkf.set_settings(JSON.stringify(settings));
-
-            // Ensure coreAdviseMode is a string, not an object
-            let coreAdviseMode = adviserSettings.coreAdviseMode;
-            if (typeof coreAdviseMode === 'object') {
-                console.warn('[taskQueue] coreAdviseMode was an object, resetting to default');
-                coreAdviseMode = "standard cores";
-            }
-            
-            // Validate and fix frequency before calling WASM
-            // Frequency must be a reasonable value (1 Hz to 100 MHz range)
-            // Values outside this range are likely uninitialized/garbage
-            const DEFAULT_FREQUENCY = 100000; // 100 kHz default
-            const MIN_VALID_FREQUENCY = 1; // 1 Hz minimum
-            const MAX_VALID_FREQUENCY = 100000000; // 100 MHz maximum
-            if (inputs.operatingPoints && inputs.operatingPoints.length > 0) {
-                inputs.operatingPoints.forEach((op, opIndex) => {
-                    if (op.excitationsPerWinding && op.excitationsPerWinding.length > 0) {
-                        op.excitationsPerWinding.forEach((exc, excIndex) => {
-                            const freq = exc.frequency;
-                            if (!freq || !Number.isFinite(freq) || freq < MIN_VALID_FREQUENCY || freq > MAX_VALID_FREQUENCY) {
-                                console.warn(`[taskQueue] Invalid frequency=${freq} in operating point ${opIndex}, excitation ${excIndex}. Set to ${DEFAULT_FREQUENCY}`);
-                                exc.frequency = DEFAULT_FREQUENCY;
-                            }
-                        });
-                    }
-                });
-            }
-
-            // Deep-clone inputs (strips Vue reactivity) and sanitize excitation signals.
-            // WASM calculate_buck_inputs returns garbage for some operating points:
-            //   - all-zero frequency harmonics → strip zero-freq entries, remove key if empty
-            //   - waveform.time arrays with trailing nulls → truncate at first null
-            //   - waveform.data arrays mismatched with time → truncate to match
+            // Deep-clone strips Vue reactivity. Bad excitations throw, naming the
+            // operating point and winding, instead of being rewritten (ABT #1417).
             const inputsClean = JSON.parse(JSON.stringify(inputs));
-            if (inputsClean.operatingPoints) {
-                for (const op of inputsClean.operatingPoints) {
-                    if (op.excitationsPerWinding == null) continue;
-                    for (const exc of op.excitationsPerWinding) {
-                        for (const signal of ['current', 'voltage']) {
-                            if (!exc[signal]) continue;
-
-                            // Sanitize harmonics
-                            const harmonics = exc[signal].harmonics;
-                            if (harmonics != null) {
-                                if (harmonics.amplitudes != null) harmonics.amplitudes = harmonics.amplitudes.filter(v => v !== null);
-                                if (harmonics.frequencies != null) harmonics.frequencies = harmonics.frequencies.filter(v => v !== null);
-                                const keep = (harmonics.frequencies || []).map(f => f !== 0);
-                                if (harmonics.amplitudes) harmonics.amplitudes = harmonics.amplitudes.filter((_, i) => keep[i]);
-                                if (harmonics.frequencies) harmonics.frequencies = harmonics.frequencies.filter((_, i) => keep[i]);
-                                if (!harmonics.amplitudes?.length && !harmonics.frequencies?.length) {
-                                    delete exc[signal].harmonics;
-                                }
-                            }
-
-                            // Sanitize waveform — truncate arrays at first null in time
-                            const waveform = exc[signal].waveform;
-                            if (waveform?.time) {
-                                const firstNull = waveform.time.indexOf(null);
-                                if (firstNull === 0) {
-                                    delete exc[signal].waveform;
-                                } else if (firstNull > 0) {
-                                    waveform.time = waveform.time.slice(0, firstNull);
-                                    if (waveform.data) waveform.data = waveform.data.slice(0, firstNull);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            requireAdviserExcitations(inputsClean);
 
             masSentry('adviseCore', inputsClean, 'Inputs');
-            const result = await mkf.calculate_advised_cores(JSON.stringify(inputsClean), JSON.stringify(coreAdviserWeights), count, coreAdviseMode);
+            // The adviser runs inside the settings queue, right after its settings are
+            // written, so no other settings writer can change them in between (ABT #1660).
+            // It winds its candidates with the coil adviser, so the wire standard is set too.
+            const preferredWireStandard = this.preferredWireStandard();
+            const result = await updateEngineSettings(mkf, (settings) => {
+                // Preferred core manufacturer (ABT #1099): the adviser searches that
+                // maker's materials first (a tiebreak in MKF, never a gate — with
+                // no match it evaluates every material and says so). The engine's
+                // own defaults are remembered from the first call so clearing the
+                // preference restores them rather than a value guessed here.
+                if (this._engineDefaultPreferredManufacturers == null) {
+                    if (!('preferredCoreMaterialFerriteManufacturer' in settings) || !('preferredCoreMaterialPowderManufacturer' in settings)) {
+                        throw new Error('Engine settings do not expose preferredCoreMaterial*Manufacturer: libMKF is older than the preferred-manufacturer feature (ABT #1099)');
+                    }
+                    this._engineDefaultPreferredManufacturers = {
+                        ferrite: settings.preferredCoreMaterialFerriteManufacturer,
+                        powder: settings.preferredCoreMaterialPowderManufacturer,
+                    };
+                }
+                const preferredManufacturer = useSettingsStore().userPreferences?.preferredCoreManufacturer ?? null;
+                settings.preferredCoreMaterialFerriteManufacturer = preferredManufacturer ?? this._engineDefaultPreferredManufacturers.ferrite;
+                settings.preferredCoreMaterialPowderManufacturer = preferredManufacturer ?? this._engineDefaultPreferredManufacturers.powder;
+
+                // CMC topology → force toroidal, no distributed gaps (winding goes around).
+                const isCmc = inputs?.designRequirements?.topology?.toLowerCase() === 'commonmodechoke';
+
+                if (isCmc) {
+                    settings["coreIncludeDistributedGaps"] = false;
+                    settings["coreIncludeMargin"] = true;
+                    settings["coreIncludeStacks"] = true;
+                    settings["useToroidalCores"] = true;
+                    settings["useConcentricCores"] = false;
+                    settings["useOnlyCoresInStock"] = false;
+                }
+                else {
+                    settings["coreIncludeDistributedGaps"] = adviserSettings.allowDistributedGaps;
+                    settings["coreIncludeMargin"] = true;
+                    settings["coreIncludeStacks"] = adviserSettings.allowStacks;
+                    settings["useToroidalCores"] = adviserSettings.allowToroidalCores;
+                    settings["useOnlyCoresInStock"] = false;
+                }
+                const enableTemperatureFilter = adviserSettings.enableTemperatureFilter === true;
+                settings["coreAdviserEnableTemperatureFilter"] = enableTemperatureFilter;
+                if (enableTemperatureFilter) {
+                    if (!Number.isFinite(adviserSettings.maximumTemperature)) {
+                        throw new Error(`The core adviser temperature filter is on but its maximum temperature is ${JSON.stringify(adviserSettings.maximumTemperature)}`);
+                    }
+                    settings["coreAdviserMaximumTemperature"] = adviserSettings.maximumTemperature;
+                }
+                if (!('preferredWireStandard' in settings)) {
+                    throw new Error('Engine settings do not expose preferredWireStandard: libMKF is older than the wire-standard preference (ABT #1110)');
+                }
+                settings.preferredWireStandard = preferredWireStandard;
+            }, () => mkf.calculate_advised_cores(JSON.stringify(inputsClean), JSON.stringify(coreAdviserWeights), count, coreAdviseMode));
 
             if (result.startsWith("Exception")) {
                 throw new Error(result);
@@ -1373,6 +1336,37 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const mkf = await waitForMkf();
             await mkf.ready;
 
+            // The design's wire is rebuilt on a copy and swapped in whole at the end. Editing it in
+            // place left it half-built across the awaits below (a litz with its strand as a size
+            // label and no outer diameter), and a simulate fired in between sent that to the MAS
+            // sentry, which refused it ("wire ... must have required property 'outerDiameter'").
+            const designWire = (oldWire != null && typeof(oldWire) == "object") ? oldWire : null;
+            if (designWire != null) {
+                oldWire = deepCopy(designWire);
+            }
+            const workingCopy = designWire != null ? oldWire : null;
+
+            // Asked for the litz the design already has (same strand size, strand count and
+            // coating, e.g. the panel re-syncing after undo or a load): keep the catalogue wire.
+            // Rebuilding it replaced its catalogue outer diameter by a computed one, rewound the
+            // coil and recorded that as a new edit, so undo landed on a fresh history entry.
+            if (newWireDataDict["type"] == "litz" && designWire != null && designWire.type == "litz"
+                && designWire.numberConductors == newWireDataDict["numberConductors"] && designWire.strand != null) {
+                let designStrand = designWire.strand;
+                if (typeof(designStrand) == "string") {
+                    const strandData = await mkf.get_wire_data_by_name(designStrand);
+                    if (strandData.startsWith("Exception")) {
+                        throw new Error(`The litz strand '${designStrand}' is not in the wire catalogue: ${strandData}`);
+                    }
+                    designStrand = JSON.parse(strandData);
+                }
+                const designCoating = await mkf.get_coating_label(JSON.stringify(designWire));
+                if (designStrand.standardName == newWireDataDict["litzStrandConductingDiameter"]
+                    && designCoating == newWireDataDict["coating"]) {
+                    return designWire;
+                }
+            }
+
             // So the outer diameter gets updated for Litz
             if (newWireDataDict["type"] == "litz") {
                 if (typeof(oldWire) != "string") {
@@ -1399,6 +1393,32 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                     wire.standard = newWireDataDict["standard"];
                 }
                 wire = JSON.parse(await mkf.get_wire_data_by_standard_name(newWireDataDict["roundConductingDiameter"]));
+                // The catalogue wire comes with its own coating (grade 1 enamelled). A
+                // different coating changes the outer diameter: pasting a TIW coating on
+                // it kept the enamelled diameter (user report #177).
+                if (coating != null && !sameCoating(wire.coating, coating)) {
+                    const conductingDiameter = await mkf.resolve_dimension_with_tolerance(JSON.stringify(wire.conductingDiameter));
+                    let outerDiameter;
+                    if (coating.type == "insulated") {
+                        try {
+                            outerDiameter = await mkf.get_wire_outer_diameter_insulated_round(conductingDiameter, coating.numberLayers, coating.thicknessLayers, wire.standard);
+                        } catch (error) {
+                            throw new Error(`MKF could not size a ${newWireDataDict["coating"]} coating on the ${wire.standard} wire ${newWireDataDict["roundConductingDiameter"]}: ${error?.message ?? error}`);
+                        }
+                    } else if (coating.type == "enamelled") {
+                        outerDiameter = await mkf.get_wire_outer_diameter_enamelled_round(conductingDiameter, coating.grade, wire.standard);
+                    } else if (coating.type == "bare") {
+                        outerDiameter = conductingDiameter;
+                    } else {
+                        throw new Error(`A round wire cannot take a ${coating.type} coating (${newWireDataDict["coating"]})`);
+                    }
+                    if (!(outerDiameter >= conductingDiameter)) {
+                        throw new Error(`MKF computed an outer diameter of ${outerDiameter} m for a ${conductingDiameter} m round wire with coating ${newWireDataDict["coating"]} (${wire.standard}); it cannot be smaller than the copper`);
+                    }
+                    wire.outerDiameter = { nominal: outerDiameter };
+                    // It is no longer the catalogue wire it was copied from.
+                    delete wire.name;
+                }
             }
             else if (newWireDataDict["type"] == "litz") {
                 if (newWireDataDict["standard"] != null) {
@@ -1459,14 +1479,16 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                     wire.outerWidth = {};
                 }
                 
-                if (coating != null) {
-                    const grade = coating.grade || 1;
-                    if (coating.type != "bare" || coating.type != "enamelled") {
-                        coating.type = "enamelled"
-                        coating.grade = 1
+                if (coating != null && coating.type == "enamelled") {
+                    if (coating.grade == null) {
+                        throw new Error(`Enamelled coating ${newWireDataDict["coating"]} has no grade`);
                     }
-                    wire.outerHeight.nominal = await mkf.get_wire_outer_height_rectangular(newWireDataDict["rectangularConductingHeight"], grade, wire.standard);
-                    wire.outerWidth.nominal = await mkf.get_wire_outer_width_rectangular(newWireDataDict["rectangularConductingWidth"], grade, wire.standard);
+                    wire.outerHeight.nominal = await mkf.get_wire_outer_height_rectangular(newWireDataDict["rectangularConductingHeight"], coating.grade, wire.standard);
+                    wire.outerWidth.nominal = await mkf.get_wire_outer_width_rectangular(newWireDataDict["rectangularConductingWidth"], coating.grade, wire.standard);
+                } else if (coating != null && coating.type != "bare") {
+                    // This used to turn every coating into grade 1 enamel ('type != bare ||
+                    // type != enamelled' is always true), silently changing the wire.
+                    throw new Error(`Rectangular wires take a bare or enamelled coating; ${newWireDataDict["coating"]} is ${coating.type}`);
                 } else {
                     // Default to conducting dimensions if no coating
                     wire.outerHeight.nominal = newWireDataDict["rectangularConductingHeight"];
@@ -1497,9 +1519,17 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 wire.outerWidth.nominal = wire.conductingWidth.nominal;
             }
 
+            const editsDesignWire = workingCopy != null && wire === workingCopy;
             wire.coating = coating;
             wire.material = "copper";
             wire = clean(wire);
+            if (editsDesignWire) {
+                for (const key of Object.keys(designWire)) {
+                    delete designWire[key];
+                }
+                Object.assign(designWire, wire);
+                wire = designWire;
+            }
             setTimeout(() => {this.newWireCreated(true, wire);}, this.task_standard_response_delay);
             return wire;
         },
@@ -1617,15 +1647,14 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         // WebFrontend the inventory store is the host's full implementation;
         // standalone MB keeps scope 'public' and always takes the classic path.
         async callCalculateAdvisedCoil(mkf, advisePayload) {
-            await this.applyPreferredWireStandard(mkf);
             const inventoryStore = useInventoryStore();
             if (inventoryStore.scope === 'only') {
                 if (!inventoryStore.engineContextLoaded) {
                     throw new Error("Adviser scope is 'only my inventory' but your inventory could not be loaded into the engine — sign in again or reload the page (see console for the original error).");
                 }
-                return await mkf.calculate_advised_coil_with_context(advisePayload, true);
+                return await this.withPreferredWireStandard(mkf, () => mkf.calculate_advised_coil_with_context(advisePayload, true));
             }
-            return await mkf.calculate_advised_coil(advisePayload);
+            return await this.withPreferredWireStandard(mkf, () => mkf.calculate_advised_coil(advisePayload));
         },
 
         allWiresAdvised(success = true, dataOrMessage = '') {
@@ -1634,21 +1663,22 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         /**
          * The wire standard follows the profile unit system (ABT #1110): IEC 60317
          * (millimetre sizes) under SI, NEMA MW 1000 C (AWG) under imperial. Pushed
-         * into the engine settings before any wire or coil advise, so the advisers
-         * only offer wires of that standard.
+         * into the engine settings for every wire or coil advise, so the advisers
+         * only offer wires of that standard. Set inside the settings queue together
+         * with the advise call: a settings writer running in between used to put the
+         * other standard back, and the advise then offered the wrong wires (ABT #1660).
          */
         preferredWireStandard() {
             return unitSystem() === 'imperial' ? 'NEMA MW 1000 C' : 'IEC 60317';
         },
-        async applyPreferredWireStandard(mkf) {
-            const settings = JSON.parse(await mkf.get_settings());
-            if (!('preferredWireStandard' in settings)) {
-                throw new Error('Engine settings do not expose preferredWireStandard: libMKF is older than the wire-standard preference (ABT #1110)');
-            }
+        withPreferredWireStandard(mkf, engineCall) {
             const wanted = this.preferredWireStandard();
-            if (settings.preferredWireStandard === wanted) return;
-            settings.preferredWireStandard = wanted;
-            await mkf.set_settings(JSON.stringify(settings));
+            return updateEngineSettings(mkf, (settings) => {
+                if (!('preferredWireStandard' in settings)) {
+                    throw new Error('Engine settings do not expose preferredWireStandard: libMKF is older than the wire-standard preference (ABT #1110)');
+                }
+                settings.preferredWireStandard = wanted;
+            }, engineCall);
         },
 
         /** Every catalogue wire, one summary row each (engine get_wires_summary, lengths in metres). */
@@ -1740,6 +1770,38 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                     coil: masWithCoil.magnetic.coil
                 };
             }
+        },
+
+        resultsAnalyzed(success = true, dataOrMessage = '') {
+        },
+
+        // MKF's findings on a simulated MAS (ABT #1855): simulate no longer judges, it returns numbers
+        // for every operating point; analyze_results says where those numbers describe a saturating
+        // core, a voltage that is not volt-second balanced, a temperature above a limit, a core past
+        // its material's data. [{operatingPointIndex, operatingPointName?, code, message}].
+        async analyzeResults(mas) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const stripNullsForWasm = (v) => {
+                if (Array.isArray(v)) { v.forEach(stripNullsForWasm); return v; }
+                if (v && typeof v === 'object') {
+                    for (const k of Object.keys(v)) {
+                        if (v[k] === null || v[k] === 'null' || v[k] === undefined) delete v[k];
+                        else stripNullsForWasm(v[k]);
+                    }
+                }
+                return v;
+            };
+            const cleanMas = stripNullsForWasm(JSON.parse(JSON.stringify({ inputs: mas.inputs, magnetic: mas.magnetic, outputs: mas.outputs })));
+            const result = await mkf.analyze_results(JSON.stringify(cleanMas));
+            if (result.startsWith("Exception")) {
+                setTimeout(() => {this.resultsAnalyzed(false, result);}, this.task_standard_response_delay);
+                throw new Error(result);
+            }
+            const findings = JSON.parse(result);
+            setTimeout(() => {this.resultsAnalyzed(true, findings);}, this.task_standard_response_delay);
+            return findings;
         },
 
         simulated(success = true, dataOrMessage = '') {
@@ -1848,6 +1910,11 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         async wind(inputCoil, repetitions, proportionPerWinding, pattern, margins, coreColumns = null, customSectionRects = null, delimitAndCompact = true) {
             const mkf = await waitForMkf();
             await mkf.ready;
+
+            // The real-winding switch decides HOW the coil is wound (connection blocking,
+            // leads), so the engine must hold the current value at the moment it winds,
+            // not whatever an earlier settings write left behind (ABT #1420).
+            await applyRealWindingGeometrySetting(mkf, useSettingsStore().magneticBuilderSettings?.useRealWindingGeometry === true);
 
             const hasCustomRects = customSectionRects != null && Object.keys(customSectionRects).length > 0;
 
@@ -2027,7 +2094,21 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            await mkf.set_settings(JSON.stringify(settings));
+            await queueEngineSettingsTask(() => mkf.set_settings(JSON.stringify(settings)));
+
+            setTimeout(() => {this.settingsSet(true, true);}, this.task_standard_response_delay);
+            return true;
+        },
+
+        /**
+         * Change some engine settings without overwriting anyone else's: `change`
+         * sets its fields on the current settings (see updateEngineSettings).
+         */
+        async updateSettings(change) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            await updateEngineSettings(mkf, change);
 
             setTimeout(() => {this.settingsSet(true, true);}, this.task_standard_response_delay);
             return true;
@@ -2076,11 +2157,17 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         coreLossesOverFrequencySwept(success = true, dataOrMessage = '') {
         },
 
-        async sweepCoreLossesOverFrequency(magnetic, operatingPoint, minimumFrequency, maximumFrequency, numberPoints, temperature, xAxisMode, title) {
+        // topology: the design's designRequirements.topology, null when it has none. The engine
+        // needs it to drive the core with the right magnetizing current (a multi-winding DMC and a
+        // CMC carry matching winding currents alike, ABT #1754).
+        async sweepCoreLossesOverFrequency(magnetic, operatingPoint, topology, minimumFrequency, maximumFrequency, numberPoints, temperature, xAxisMode, title) {
+            if (topology === undefined) {
+                throw new Error("sweepCoreLossesOverFrequency needs the design's topology (null when the design has none)");
+            }
             const mkf = await waitForMkf();
             await mkf.ready;
 
-            const result = await mkf.sweep_core_losses_over_frequency(JSON.stringify(magnetic), JSON.stringify(operatingPoint), minimumFrequency, maximumFrequency, numberPoints, temperature, xAxisMode, title);
+            const result = await mkf.sweep_core_losses_over_frequency(JSON.stringify(magnetic), JSON.stringify(operatingPoint), JSON.stringify(topology), minimumFrequency, maximumFrequency, numberPoints, temperature, xAxisMode, title);
 
             if (result.startsWith("Exception")) {
                 setTimeout(() => {this.coreLossesOverFrequencySwept(false, result);}, this.task_standard_response_delay);

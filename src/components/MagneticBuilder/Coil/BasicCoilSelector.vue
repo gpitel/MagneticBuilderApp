@@ -15,6 +15,7 @@ import { useHistoryStore } from '../../../stores/history'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 import { useMagneticBuilderSettingsStore } from '../../../stores/magneticBuilderSettings'
 import { useWindingStudioStore } from '../../../stores/windingStudio'
+import { useStoredCoilLayoutStore } from '../../../stores/storedCoilLayout'
 
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 </script>
@@ -87,6 +88,7 @@ export default {
         const taskQueueStore = useTaskQueueStore();
         const magneticBuilderSettingsStore = useMagneticBuilderSettingsStore();
         const windingStudioStore = useWindingStudioStore();
+        const storedCoilLayoutStore = useStoredCoilLayoutStore();
         const showAlignmentOptions = false;
 
         const showInsulationOptions = false;
@@ -160,6 +162,8 @@ export default {
             historyStore,
             magneticBuilderSettingsStore,
             windingStudioStore,
+            storedCoilLayoutStore,
+            storedCoilFitReported: false,
             localData,
             forceUpdate,
             showAlignmentOptions,
@@ -179,6 +183,9 @@ export default {
         }
     },
     computed: {
+        realWindingSetting() {
+            return this.$settingsStore?.magneticBuilderSettings?.useRealWindingGeometry === true;
+        },
         conductiveSections() {
             const sections = [];
 
@@ -297,27 +304,65 @@ export default {
             this.oldMagneticCoilHash = null;
             this.oldInputsCoilHash = null;
         },
+        // Real winding changes how the coil is WOUND (connection blocking, leads), not only
+        // how it is drawn: re-wind the design under the new setting through the normal wind
+        // path, so a coil laid out ideal is laid out again with blocking, or the panel says
+        // why it no longer fits (ABT #1420). The coil itself is unchanged, so the hashes that
+        // de-duplicate winds are cleared or the re-wind is skipped as a repeat.
+        realWindingSetting(newValue, oldValue) {
+            if (newValue === oldValue) {
+                return;
+            }
+            this.oldMagneticCoilHash = null;
+            this.oldInputsCoilHash = null;
+            this.tryToWind();
+        },
+    },
+    created () {
+        // Read the panel's knobs back from the coil BEFORE the inputs are created. Done in
+        // mounted(), the inputs first showed the defaults and then saw the real values
+        // arrive as a change: each reported it as an update (asking for a wind), and the
+        // proportions input rewrote the values it had just been given.
+        this.assignLocalData(this.masStore.mas.magnetic);
+
+        this.getProportionsAndPattern(this.masStore.mas.magnetic.coil);
     },
     mounted () {
+        // A design that has just been loaded: a coil that came wound keeps its layout
+        // (see keepStoredCoilLayout); one that came without turns, or with turns that
+        // are not the ones its windings ask for, is wound here.
         if (this.$stateStore.loadingDesign) {
-            this._loadingTimer = setTimeout(() => {
-                this.$stateStore.loadingDesign = false;
-                this._loadingTimer = null;
-            }, 2000);
+            this.releaseLoadingDesignSoon();
+            if (this.coilIsWound()) {
+                this.keepStoredCoilLayout();
+            }
+            else {
+                this.storedCoilLayoutStore.drop(this.masStore.$id);
+                this.tryToWind();
+            }
         }
         else {
             this.tryToWind();
         }
-        this.assignLocalData(this.masStore.mas.magnetic);
-
-        this.getProportionsAndPattern(this.masStore.mas.magnetic.coil);
 
         this.subscriptions.push(this.masStore.$onAction((action) => {
             action.after(() => {
                 if (action.name == "importedMas") {
+                    // A file loaded while the builder is on screen: this panel stays
+                    // mounted, so mounted() is not there to end the loading state the
+                    // loader sets right after this action; it stayed on for good, and
+                    // the wire and core panels ignore changes while it is on.
+                    this.releaseLoadingDesignSoon();
                     this.resetProportionPerWinding(this.localData);
-                    this.tryToWind();
                     this.assignLocalData(this.masStore.mas.magnetic);
+                    if (this.coilIsWound()) {
+                        this.getProportionsAndPattern(this.masStore.mas.magnetic.coil);
+                        this.keepStoredCoilLayout();
+                    }
+                    else {
+                        this.storedCoilLayoutStore.drop(this.masStore.$id);
+                        this.tryToWind();
+                    }
                 }
                 if (action.name == "resetMas") {
                     // Reset localData to defaults based on application type
@@ -491,10 +536,19 @@ export default {
                         });
                     }
                 })
-                this.localData.proportionPerWinding = []
-                windingDimensions.forEach((elem) => {
-                    this.localData.proportionPerWinding.push(roundWithDecimals(elem / windingDimensionsTotal, 0.01));
-                })
+                // Whole percents that add up to exactly 100 (largest remainder). Each
+                // one rounded on its own could add up to 101, and the proportions input
+                // then took the excess out of the other windings (38/14/24/25 came back
+                // as 26/21/26/26).
+                const exactPercents = windingDimensions.map((elem) => elem / windingDimensionsTotal * 100);
+                const percents = exactPercents.map((percent) => Math.floor(percent));
+                const missingPercents = 100 - percents.reduce((sum, percent) => sum + percent, 0);
+                exactPercents
+                    .map((percent, windingIndex) => ({ windingIndex, remainder: percent - Math.floor(percent) }))
+                    .sort((a, b) => b.remainder - a.remainder)
+                    .slice(0, missingPercents)
+                    .forEach(({ windingIndex }) => { percents[windingIndex] += 1; });
+                this.localData.proportionPerWinding = percents.map((percent) => percent / 100);
                 // A winding whose derived proportion rounds to 0 (degenerate or
                 // corrupt sectionsDescription, e.g. a 0.005deg toroidal section)
                 // can never hold its turns: the wind throws "Turns not created"
@@ -957,11 +1011,9 @@ export default {
                 // 1. From now on the engine emits one winding window per wound-column
                 //    edge (idempotent; legacy geometry is byte-identical when nothing
                 //    is placed laterally).
-                const settings = await this.taskQueueStore.getSettings();
-                if (!settings.corePerColumnWindingWindows) {
+                await this.taskQueueStore.updateSettings((settings) => {
                     settings.corePerColumnWindingWindows = true;
-                    await this.taskQueueStore.setSettings(settings);
-                }
+                });
 
                 // 2. Reprocess the core so it carries the per-column windows. Flag the
                 //    pending bobbin regeneration so the coreProcessed subscriber does
@@ -1028,11 +1080,9 @@ export default {
                 }
 
                 // 1. Engine emits one winding window per wound-column edge.
-                const settings = await this.taskQueueStore.getSettings();
-                if (!settings.corePerColumnWindingWindows) {
+                await this.taskQueueStore.updateSettings((settings) => {
                     settings.corePerColumnWindingWindows = true;
-                    await this.taskQueueStore.setSettings(settings);
-                }
+                });
 
                 // 2. Reprocess the core so it carries the per-column windows. Flag
                 //    the pending bobbin regeneration so the coreProcessed subscriber
@@ -1142,6 +1192,23 @@ export default {
                 return;
             }
 
+            // A coil that was loaded wound keeps its layout while nothing a wind depends on
+            // has changed (ABT #1838). Everything that asks for a wind ends up here, so
+            // this one check covers the inputs' mount-time update events, the events
+            // other panels fire as they mount, undo, and coming back to the builder.
+            const storedLayoutSignature = this.storedCoilLayoutStore.signatureFor(this.masStore.$id);
+            if (storedLayoutSignature != null) {
+                if (this.coilIsWound() && this.windInputsSignature() === storedLayoutSignature) {
+                    if (!this.storedCoilFitReported) {
+                        this.reportCoilFit(this.masStore.mas.magnetic.coil);
+                        this.storedCoilFitReported = true;
+                    }
+                    this.tryingToSend = false;
+                    return;
+                }
+                this.storedCoilLayoutStore.drop(this.masStore.$id);
+            }
+
             const inputCoil = deepCopy(this.masStore.mas.magnetic.coil);
 
             // Normalize wire: "" to "Dummy" — empty string is not a valid wire name
@@ -1242,17 +1309,19 @@ export default {
                     // Core columns ride along so multi-column placements (winding
                     // studio) can wind lateral-leg frames; no-op for classic coils.
                     const coreColumns = this.masStore.mas.magnetic.core?.processedDescription?.columns ?? null;
+                    // A wind takes a while, and a request to wind again while it runs is
+                    // dropped (tryingToSend). If the windings change meanwhile (an advised
+                    // wire lands), this result describes the OLD windings: applying it put
+                    // the previous wire back over the advised one (ABT #1660). Wind the
+                    // current coil instead.
+                    const windingsAtStart = JSON.stringify(this.masStore.mas.magnetic.coil.functionalDescription);
                     this.taskQueueStore.wind(inputCoil, this.localData.repetitions, this.localData.proportionPerWinding, pattern, margins, coreColumns, customSectionRects, compactEnabled).then((coil) => {
-                        this.taskQueueStore.calculateFillingFactors(coil).then((fillingFactors) => {
-                            this.localData.fillingFactors = fillingFactors;
-                            // A layout that shows the coil's numbers away from this
-                            // panel needs them too (ABT #1121).
-                            this.$emit('fillingFactorsChanged', fillingFactors);
-                        })
-
-                        this.taskQueueStore.checkIfSectionsAndLayersFit(coil).then((fits) => {
-                            this.$emit("fits", fits);
-                        })
+                        if (JSON.stringify(this.masStore.mas.magnetic.coil.functionalDescription) !== windingsAtStart) {
+                            this.tryingToSend = false;
+                            this.tryToWind();
+                            return;
+                        }
+                        this.reportCoilFit(coil);
 
                         // Preserve the bobbin from the existing coil before assigning the new coil
                         // The wind() function returns a coil without bobbin data
@@ -1292,6 +1361,85 @@ export default {
                 this.tryingToSend = false;
             }
 
+        },
+        releaseLoadingDesignSoon() {
+            if (this._loadingTimer) clearTimeout(this._loadingTimer);
+            this._loadingTimer = setTimeout(() => {
+                this.$stateStore.loadingDesign = false;
+                this._loadingTimer = null;
+            }, 2000);
+        },
+        // Wound: the coil holds turns, and they are the turns its windings ask for (every
+        // winding has number of turns x number of parallels of them, and no turn belongs
+        // to a winding that is not there). Turns left over from other windings (a file
+        // whose turns were edited by hand, or exported half wound) are not a layout to
+        // keep: that coil is wound again.
+        coilIsWound() {
+            const coil = this.masStore.mas.magnetic.coil;
+            const turnsDescription = coil?.turnsDescription;
+            if (!Array.isArray(turnsDescription) || turnsDescription.length == 0) {
+                return false;
+            }
+            const turnsPerWinding = {};
+            turnsDescription.forEach((turn) => {
+                turnsPerWinding[turn.winding] = (turnsPerWinding[turn.winding] ?? 0) + 1;
+            });
+            const windings = coil.functionalDescription;
+            return Object.keys(turnsPerWinding).length == windings.length
+                && windings.every((winding) => turnsPerWinding[winding.name] === winding.numberTurns * winding.numberParallels);
+        },
+        // Everything a wind depends on, as this panel holds it: the windings, the bobbin,
+        // and the panel's own knobs. The sections, layers and turns are the RESULT of a
+        // wind and stay out. The alignment and orientation of the sections are taken from
+        // the panel, and the per-section data is fitted to the pattern, exactly as
+        // coilUpdated() does before it winds, so that those write-backs do not read as a
+        // change.
+        windInputsSignature() {
+            const coil = this.masStore.mas.magnetic.coil;
+            const bobbin = deepCopy(coil.bobbin);
+            const centrePart = Array.isArray(bobbin) ? bobbin[0] : bobbin;
+            const centreWindow = centrePart?.processedDescription?.windingWindows?.[0];
+            if (centreWindow != null) {
+                centreWindow.sectionsAlignment = this.localData.sectionsAlignment;
+                centreWindow.sectionsOrientation = this.localData.sectionsOrientation;
+            }
+            const dataPerSection = deepCopy(this.localData.dataPerSection);
+            this.fitDataPerSectionToPattern(dataPerSection);
+            return generateHash(JSON.stringify({
+                windings: coil.functionalDescription,
+                bobbin: bobbin,
+                pattern: this.localData.pattern,
+                repetitions: this.localData.repetitions,
+                // To the resolution of the input: it hands the values back through a
+                // percent conversion, which moves the last binary digit.
+                proportionPerWinding: this.localData.proportionPerWinding.map((proportion) => Math.round(proportion * 1e6) / 1e6),
+                dataPerSection: dataPerSection,
+                interlayerThickness: this.localData.interlayerThickness,
+                intersectionThickness: this.localData.intersectionThickness,
+                customSectionRects: this.windingStudioStore.customSectionRects,
+                compact: this.windingStudioStore.compactEnabled,
+                windingStyleOverrides: this.windingStudioStore.windingStyleOverrides,
+                realWinding: this.realWindingSetting,
+            }));
+        },
+        // The layout the loaded coil holds stands for the inputs the panel has just read
+        // back from it. Nothing is wound; the panel still needs the coil's fill and fit.
+        keepStoredCoilLayout() {
+            this.storedCoilLayoutStore.keep(this.masStore.$id, this.windInputsSignature());
+            this.reportCoilFit(this.masStore.mas.magnetic.coil);
+            this.storedCoilFitReported = true;
+        },
+        reportCoilFit(coil) {
+            this.taskQueueStore.calculateFillingFactors(coil).then((fillingFactors) => {
+                this.localData.fillingFactors = fillingFactors;
+                // A layout that shows the coil's numbers away from this
+                // panel needs them too (ABT #1121).
+                this.$emit('fillingFactorsChanged', fillingFactors);
+            })
+
+            this.taskQueueStore.checkIfSectionsAndLayersFit(coil).then((fits) => {
+                this.$emit("fits", fits);
+            })
         },
         tryToWind() {
             if (!this.tryingToSend) {
@@ -1463,24 +1611,27 @@ export default {
             this.tryToWind();
         },
         updateDataPerSection() {
+            this.fitDataPerSectionToPattern(this.localData.dataPerSection);
+        },
+        fitDataPerSectionToPattern(dataPerSection) {
 
-            while (this.localData.dataPerSection.length > this.localData.pattern.length) {
-                this.localData.dataPerSection.pop();
+            while (dataPerSection.length > this.localData.pattern.length) {
+                dataPerSection.pop();
             }
 
             this.localData.pattern.split('').forEach((windingIndexPlusOne, newSectionIndex) => {
-                if (newSectionIndex >= this.localData.dataPerSection.length) {
+                if (newSectionIndex >= dataPerSection.length) {
                     let newSection = null;
                     // Inherit from the last section of the same winding
                     for (let i = newSectionIndex - 1; i >= 0; i--) {
                         if (this.localData.pattern[i] == windingIndexPlusOne) {
-                            newSection = deepCopy(this.localData.dataPerSection[i]);
+                            newSection = deepCopy(dataPerSection[i]);
                             break;
                         }
                     }
                     // Fallback to the immediately previous section
                     if (!newSection && newSectionIndex > 0) {
-                        newSection = deepCopy(this.localData.dataPerSection[newSectionIndex - 1]);
+                        newSection = deepCopy(dataPerSection[newSectionIndex - 1]);
                     }
                     // Final fallback to defaults
                     if (!newSection) {
@@ -1491,7 +1642,7 @@ export default {
                             bottomOrRightMargin: 0,
                         };
                     }
-                    this.localData.dataPerSection.push(newSection);
+                    dataPerSection.push(newSection);
                 }
             })
 
@@ -1641,11 +1792,6 @@ export default {
                         @setSectionLayout="setSectionLayoutFromStudio"
                         @autoFit="autoFitFromStudio"
                         @setWindingGroups="setWindingGroupsFromStudio"
-                        :ferriteColor="$styleStore.magneticBuilder.painterColorFerrite || '0x7b7c7d'"
-                        :bobbinColor="$styleStore.magneticBuilder.painterColorBobbin || '0x539796'"
-                        :copperColor="$styleStore.magneticBuilder.painterColorCopper || '0xb87333'"
-                        :insulationColor="$styleStore.magneticBuilder.painterColorInsulation || '0xfff05b'"
-                        :marginColor="$styleStore.magneticBuilder.painterColorMargin || '0xfff05b'"
                         :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || 'transparent'"
                         :textColor="$styleStore.magneticBuilder.inputTextColor?.color || '#ffffff'"
                     />
@@ -1668,11 +1814,6 @@ export default {
                          :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || 'var(--p-dark)'"
                          :textColor="$styleStore.magneticBuilder.inputTextColor?.color || 'var(--p-white)'"
                          :buttonStyle="$styleStore.magneticBuilder.coilVisualizerButton"
-                         :insulationColor="$styleStore.magneticBuilder.painterColorInsulation || '0xfff05b'"
-                         :marginColor="$styleStore.magneticBuilder.painterColorMargin || '0xfff05b'"
-                         :spacerColor="$styleStore.magneticBuilder.painterColorSpacer || '0x3b3b3b'"
-                         :ferriteColor="$styleStore.magneticBuilder.painterColorFerrite || '0x7b7c7d'"
-                         :copperColor="$styleStore.magneticBuilder.painterColorCopper || '0xb87333'"
                          :drawSpacer="$styleStore.magneticBuilder.painterDrawSpacer !== undefined ? $styleStore.magneticBuilder.painterDrawSpacer : true"
                          :enableTemperaturePlot="enableTemperaturePlot"
                          @plotModeChange="$emit('plotModeChange', $event)"

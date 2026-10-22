@@ -4,6 +4,7 @@ import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import { removeTrailingZeroes, deepCopy, isMobile, toCamelCase } from '/WebSharedComponents/assets/js/utils.js'
 import LineVisualizer from '/WebSharedComponents/Common/LineVisualizer.vue'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
+import { describeGraphError } from './graphErrors.js'
 </script>
 
 <script>
@@ -56,6 +57,7 @@ export default {
 
         return {
             taskQueueStore,
+            errorMessage: "",
             magnetizingInductanceOverTemperatureData,
             temperatureData,
             forceUpdate,
@@ -130,6 +132,7 @@ export default {
             }
             this.temperatureData.type = this.$stateStore.graphParameters.xAxisMode == "linear"? "value" : this.$stateStore.graphParameters.xAxisMode;
             this.magnetizingInductanceOverTemperatureData[0].type = this.$stateStore.graphParameters.yAxisMode == "linear"? "value" : this.$stateStore.graphParameters.yAxisMode;
+            this.errorMessage = "";
             this.taskQueueStore.sweepMagnetizingInductanceOverTemperature(this.masStore.mas.magnetic, this.$stateStore.graphParameters.minimumTemperature, this.$stateStore.graphParameters.maximumTemperature, this.$stateStore.graphParameters.numberPoints, 10000, this.$stateStore.graphParameters.xAxisMode, "Magnetizing inductance over temperature").then((curve2D) => {
                     this.magnetizingInductanceOverTemperatureData[0].data = {
                         x: curve2D.xPoints,
@@ -144,6 +147,7 @@ export default {
             })
             .catch(error => {
                 console.error(error);
+                this.errorMessage = describeGraphError(error, "the magnetizing inductance");
                 this.loading = false;
                 this.magnetizingInductanceOverTemperatureData[0].data = {
                     x: [],
@@ -167,6 +171,7 @@ export default {
             </div>
             <div :class="$slots.default ? 'col-12 md:col-9 graph-viz-col' : 'col-12 graph-viz-col'">
                 <img :data-cy="dataTestLabel + '-MagnetizingInductancesOverTemperature-loading'" v-if="loading" class="mx-auto d-block graph-loading" alt="loading" :src="$settingsStore.loadingGif">
+                <label v-if="errorMessage != ''" :data-cy="dataTestLabel + '-Graph-ErrorMessage'" class="text-danger m-0 d-block" style="font-size: 0.9em">{{ errorMessage }}</label>
                 <LineVisualizer 
                     v-show="!loading"
                     :data="magnetizingInductanceOverTemperatureData"

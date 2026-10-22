@@ -90,6 +90,8 @@ export default {
         const subscriptions = [];
 
         return {
+            // The thickness and width this panel read back from the wire of the design.
+            wireShown: null,
             taskQueueStore,
             blockingRebounds,
             wireHash,
@@ -105,6 +107,9 @@ export default {
     computed: {
     },
     watch: {
+        loading(value) {
+            this.taskQueueStore.wireAdviseBusy = value;
+        },
     },
     mounted () {
         this.getWireThicknesses();
@@ -118,6 +123,7 @@ export default {
         }));
     },
     beforeUnmount() {
+        if (this.loading) this.taskQueueStore.wireAdviseBusy = false;
         this.subscriptions.forEach((unsubscribe) => unsubscribe());
     },
     methods: {
@@ -132,12 +138,24 @@ export default {
                 this.localData["wireThickness"] = wire.standardName;
                 this.taskQueueStore.resolveDimensionWithTolerance(wire.conductingWidth).then((dimension) => {
                     this.localData["wireWidth"] = dimension;
+                    this.wireShown = { wireThickness: wire.standardName, wireWidth: dimension };
                     this.forceUpdate += 1;
                 })
             }
         },
         assignWire() {
             this.errorMessage = "";
+            // The inputs report an update when they receive the values read back from the
+            // wire of the design. Nothing was changed then, and the wire of the design
+            // stays: built again from the two knobs it is the catalogue wire of that
+            // thickness, which is another wire when the design holds a copper thickness
+            // of its own (a loaded "3 oz." wire 0.5 mm thick came back 0.104 mm thick,
+            // and its stored layout was cleared and wound again; ABT #1838).
+            if (this.wireShown != null
+                && this.localData["wireThickness"] === this.wireShown.wireThickness
+                && this.localData["wireWidth"] === this.wireShown.wireWidth) {
+                return;
+            }
             let wire = {};
             if (this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex].wire != "" && this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex].wire != "Dummy") {
                 wire = this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex].wire;
@@ -166,6 +184,7 @@ export default {
 
                 this.$stateStore.wire2DVisualizerState.plotCurrentViews[this.windingIndex] = null;
                 this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex].wire = wire;
+                this.wireShown = { wireThickness: wire.standardName, wireWidth: wire.conductingWidth.nominal };
                 if (!this.taskQueueStore.windingIndexChangeBlock && !wireUnchanged) {
                     this.cleanCoil();
                     this.$emit("wireUpdated", this.windingIndex);
@@ -206,72 +225,70 @@ export default {
             setTimeout(() => this.adviseAllWires(), 100);
         },
         adviseAllWires() {
-            this.taskQueueStore.getSettings().then((settings) => {
+            this.taskQueueStore.updateSettings((settings) => {
                 settings["coilMaximumLayersPlanar"] = 24;
-                this.taskQueueStore.setSettings(settings).then(() => {
+            }).then(() => {
 
-                    this.taskQueueStore.adviseAllWires(this.masStore.mas)
-                    .then((coil) => {
-                        this.errorMessage = "";
-                        if (!this.taskQueueStore.windingIndexChangeBlock) {
-                            this.masStore.mas.magnetic.coil = coil;
-                            this.assignLocalData(coil.functionalDescription[this.windingIndex].wire);
-                            // Don't clean coil here - the advised coil already has valid layers/turns
-                            this.$emit("wireUpdated", this.windingIndex);
+                this.taskQueueStore.adviseAllWires(this.masStore.mas)
+                .then((coil) => {
+                    this.errorMessage = "";
+                    if (!this.taskQueueStore.windingIndexChangeBlock) {
+                        this.masStore.mas.magnetic.coil = coil;
+                        this.assignLocalData(coil.functionalDescription[this.windingIndex].wire);
+                        // Don't clean coil here - the advised coil already has valid layers/turns
+                        this.$emit("wireUpdated", this.windingIndex);
 
-                            this.$stateStore.wire2DVisualizerState.plotCurrentViews = {};
-                            setTimeout(() => this.loading = false, 100);
-
-                            // Trigger rewinding and resimulation
-                            this.taskQueueStore.newWireCreated(true, coil.functionalDescription[this.windingIndex].wire);
-                        }
-
-                    })
-                    .catch(error => {
-                        this.errorMessage = "Our advisers could not find a wire. Sorry, you are on your own!";
-                        setTimeout(() => {this.errorMessage = ""}, 10000);
-                        this.loading = false;
-                        console.error(error);
-                    })
-                })
-            })
-        },
-        adviseWire() {
-            this.taskQueueStore.getSettings().then((settings) => {
-                settings["coilMaximumLayersPlanar"] = 24;
-                this.taskQueueStore.setSettings(settings).then(() => {
-                    this.taskQueueStore.adviseWire(this.masStore.mas, this.windingIndex)
-                    .then((result) => {
-                        this.errorMessage = "";
-                        const winding = result.winding;
-                        const coil = result.coil;
-                        
-                        // Always update UI (localData) regardless of block
-                        this.assignLocalData(winding.wire);
-                        
-                        // Only update coil and trigger actions if not blocked
-                        if (!this.taskQueueStore.windingIndexChangeBlock) {
-                            this.masStore.mas.magnetic.coil = coil;
-                            // Don't clean coil here - the advised coil already has valid layers/turns
-                            this.$emit("wireUpdated", this.windingIndex);
-
-                            this.$stateStore.wire2DVisualizerState.plotCurrentViews[this.windingIndex] = null;
-
-                            // Trigger rewinding and resimulation
-                            this.taskQueueStore.newWireCreated(true, winding.wire);
-                        }
-                        
+                        this.$stateStore.wire2DVisualizerState.plotCurrentViews = {};
                         setTimeout(() => this.loading = false, 100);
 
-                    })
-                    .catch(error => {
-                        this.errorMessage = "Our advisers could not find a wire. Sorry, you are on your own!";
-                        this.loading = false;
-                        setTimeout(() => {this.errorMessage = ""}, 10000);
-                        console.error(error);
-                    })
+                        // Trigger rewinding and resimulation
+                        this.taskQueueStore.newWireCreated(true, coil.functionalDescription[this.windingIndex].wire);
+                    }
+
                 })
-            });
+                .catch(error => {
+                    this.errorMessage = "Our advisers could not find a wire. Sorry, you are on your own!";
+                    setTimeout(() => {this.errorMessage = ""}, 10000);
+                    this.loading = false;
+                    console.error(error);
+                })
+                })
+        },
+        adviseWire() {
+            this.taskQueueStore.updateSettings((settings) => {
+                settings["coilMaximumLayersPlanar"] = 24;
+            }).then(() => {
+                this.taskQueueStore.adviseWire(this.masStore.mas, this.windingIndex)
+                .then((result) => {
+                    this.errorMessage = "";
+                    const winding = result.winding;
+                    const coil = result.coil;
+                    
+                    // Always update UI (localData) regardless of block
+                    this.assignLocalData(winding.wire);
+                    
+                    // Only update coil and trigger actions if not blocked
+                    if (!this.taskQueueStore.windingIndexChangeBlock) {
+                        this.masStore.mas.magnetic.coil = coil;
+                        // Don't clean coil here - the advised coil already has valid layers/turns
+                        this.$emit("wireUpdated", this.windingIndex);
+
+                        this.$stateStore.wire2DVisualizerState.plotCurrentViews[this.windingIndex] = null;
+
+                        // Trigger rewinding and resimulation
+                        this.taskQueueStore.newWireCreated(true, winding.wire);
+                    }
+                    
+                    setTimeout(() => this.loading = false, 100);
+
+                })
+                .catch(error => {
+                    this.errorMessage = "Our advisers could not find a wire. Sorry, you are on your own!";
+                    this.loading = false;
+                    setTimeout(() => {this.errorMessage = ""}, 10000);
+                    console.error(error);
+                })
+                });
         },
         customizeWire() {
         },
@@ -293,7 +310,7 @@ export default {
                     <button
                         v-if="masStore.mas.magnetic.coil.functionalDescription.length > 1"
                         type="button"
-                        :disabled="loading"
+                        :disabled="loading || taskQueueStore.coreAdviseBusy"
                         :data-cy="dataTestLabel + 'Wire-Advise-button'"
                         class="wire-config-header-btn wire-config-header-btn-primary"
                         @click="adviseWireRequested"
@@ -304,7 +321,7 @@ export default {
                     <button
                         v-if="masStore.mas.magnetic.coil.functionalDescription.length > 1"
                         type="button"
-                        :disabled="loading"
+                        :disabled="loading || taskQueueStore.coreAdviseBusy"
                         :data-cy="dataTestLabel + 'Wire-Advise-All-button'"
                         class="wire-config-header-btn wire-config-header-btn-primary"
                         @click="adviseAllWiresRequested"
@@ -315,7 +332,7 @@ export default {
                     <button
                         v-if="masStore.mas.magnetic.coil.functionalDescription.length == 1"
                         type="button"
-                        :disabled="loading"
+                        :disabled="loading || taskQueueStore.coreAdviseBusy"
                         :data-cy="dataTestLabel + 'Wire-Advise-button'"
                         class="wire-config-header-btn wire-config-header-btn-primary"
                         @click="adviseWireRequested"

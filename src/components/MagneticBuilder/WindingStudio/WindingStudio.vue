@@ -9,7 +9,8 @@
 // Gated by magneticBuilderSettings.enableWindingStudio.
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
 import { buildStudioModel, buildConnectionViews, windingColor, annularSectorPath, woundDistanceToAngleDeg, wiresEqual } from './geometry.js';
-import { waitForMkf } from '/WebSharedComponents/assets/js/mkfRuntime';
+import { waitForMkf, applyRealWindingGeometrySetting } from '/WebSharedComponents/assets/js/mkfRuntime';
+import { useSettingsStore } from '/src/stores/settings';
 
 const props = defineProps({
     dataTestLabel: {
@@ -113,6 +114,8 @@ const model = computed(() => buildStudioModel(props.masStore.mas?.magnetic));
 // layout must never look like a real one.
 const showConnections = ref(true);
 const connectionLayout = ref(null);
+const settingsStore = useSettingsStore();
+const realWindingSetting = computed(() => settingsStore.magneticBuilderSettings?.useRealWindingGeometry === true);
 const connectionsPending = ref(false);
 let connectionRequestId = 0;
 
@@ -127,6 +130,9 @@ async function fetchConnectionLayout() {
     connectionsPending.value = true;
     try {
         const mkf = await waitForMkf();
+        // The engine answers with its own real-winding flag; set it from the user's setting first
+        // so the layout (and whether it is drawn at all) follows that setting.
+        await applyRealWindingGeometrySetting(mkf, realWindingSetting.value);
         const raw = await mkf.get_connection_layout(JSON.stringify(magnetic));
         if (requestId !== connectionRequestId) return;   // superseded
         connectionLayout.value = JSON.parse(raw);
@@ -146,7 +152,7 @@ async function fetchConnectionLayout() {
 const connections = computed(() => buildConnectionViews(connectionLayout.value));
 
 watch(
-    () => [props.masStore.mas?.magnetic, showConnections.value],
+    () => [props.masStore.mas?.magnetic, showConnections.value, realWindingSetting.value],
     () => { fetchConnectionLayout(); },
     { deep: true, immediate: true },
 );
@@ -1848,7 +1854,7 @@ function endTransformDrag() {
                 </label>
                 <span v-if="showConnections && connectionsPending" class="winding-studio-hint">computing connections…</span>
                 <span
-                    v-else-if="showConnections && connections.markers.length > 0 && connections.declined"
+                    v-else-if="showConnections && connections.realWinding && connections.markers.length > 0 && connections.declined"
                     class="winding-studio-hint"
                 >MKF declined the connection blocking — turns are NOT displaced around these routes</span>
             </div>
@@ -2046,7 +2052,10 @@ function endTransformDrag() {
                          the C++ painter's colours so the Studio and the 2D visualizer read the
                          same. Dashed red when MKF declined the blocking — an undisplaced layout
                          must never look like a real one. -->
-                    <g v-if="showConnections && connections.markers.length > 0" class="winding-studio-connections">
+                    <!-- Only with real winding geometry on: without it the turns are laid out
+                         ideally and never make room for a lead, so the markers would just paint
+                         over turns that are really there. -->
+                    <g v-if="showConnections && connections.realWinding && connections.markers.length > 0" class="winding-studio-connections">
                         <polyline
                             v-for="route in connections.routes"
                             :key="'route-' + route.key"

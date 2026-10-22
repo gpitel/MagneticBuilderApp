@@ -1,10 +1,11 @@
 <script setup>
-import { removeTrailingZeroes, deepCopy, isMobile, effectiveBobbin } from '/WebSharedComponents/assets/js/utils.js'
+import { removeTrailingZeroes, deepCopy, isMobile, effectiveBobbin, formatPower } from '/WebSharedComponents/assets/js/utils.js'
 import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.vue'
 import WindingSelector from '../Common/WindingSelector.vue'
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 import { useModelSettingsStore } from '../../../stores/modelSettings'
+import { useSimulationFindingsStore } from '../../../stores/simulationFindings'
 import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
 </script>
 
@@ -245,6 +246,10 @@ export default {
                 , this.$settingsStore.waitingTimeAfterChange);
             }
         },
+        powerLabel(watts) {
+            const { label, unit } = formatPower(watts);
+            return `${Number(Number(label).toPrecision(3))} ${unit}`;
+        },
         updateFields(outputs) {
             this.outputsData.proximityLosses = 0;
             this.outputsData.ohmicLosses = 0;
@@ -309,6 +314,14 @@ export default {
                 // Use pending models if available, otherwise fall back to store values
                 const magneticFieldStrength = pendingModels?.magneticFieldStrengthModel || this.modelSettingsStore.magneticFieldStrengthModel;
                 const magneticFieldStrengthFringingEffect = pendingModels?.magneticFieldStrengthFringingEffectModel || this.modelSettingsStore.magneticFieldStrengthFringingEffectModel;
+                // The field-strength models are loaded from the engine asynchronously on first open; until
+                // they are, there is nothing to simulate with (MKF throws on a null model name). Their load
+                // resimulates, which runs this again.
+                if (!magneticFieldStrength || !magneticFieldStrengthFringingEffect) {
+                    this.loading = false;
+                    this.dataUptoDate = false;
+                    return;
+                }
                 
                 const modelsData = {
                     coreLosses: this.$userStore.selectedModels['coreLosses'] || Defaults.coreLossesModelDefault,
@@ -345,6 +358,8 @@ export default {
                 const coilReady = coreReady && coil.turnsDescription != null && coil.layersDescription != null;
                 if (coilReady && (inputsString != this.lastSimulatedInputs || magneticsString != this.lastSimulatedMagnetics || modelsString != this.lastSimulatedModels)) {
 
+                    // The findings shown were for the design before this change.
+                    useSimulationFindingsStore().clear(this.masStore.$id);
                     this.taskQueueStore.simulate(this.masStore.mas, modelsData).then((mas) => {
 
                         this.lastSimulatedInputs = inputsString;
@@ -356,12 +371,31 @@ export default {
                         this.loading = false;
                         this.dataUptoDate = true;
                         this.simulationError = '';
+                        // MKF's verdict on these outputs, per operating point (ABT #1855). Asked
+                        // for this simulation only: a later one replaces it, a failed one drops it.
+                        const findingsStore = useSimulationFindingsStore();
+                        this.taskQueueStore.analyzeResults(mas).then((findings) => {
+                            if (inputsString == this.lastSimulatedInputs && magneticsString == this.lastSimulatedMagnetics) {
+                                findingsStore.set(this.masStore.$id, findings);
+                            }
+                        })
+                        .catch((error) => {
+                            findingsStore.clear(this.masStore.$id);
+                            this.simulationError = `MKF could not analyse the simulated results: ${error?.message || String(error)}`;
+                        });
                     })
                     .catch(error => {
                         // Show the real MKF error in the panel — a console-only
                         // error made simulation failures look like a silent hang.
                         this.simulationError = error?.message || String(error);
                         this.dataUptoDate = false;
+                        // The stored outputs were computed for an earlier state of this
+                        // design (a loaded file's, or the last edit's). Kept, they read as
+                        // the answer for what is on screen: user report #185 kept 147 W of
+                        // core loss computed for another coil. Drop them; the panel shows
+                        // the error instead.
+                        this.masStore.mas.outputs = [];
+                        useSimulationFindingsStore().clear(this.masStore.$id);
                         console.error('[CoilInfo] Simulation error:', error);
                         this.loading = false;
                     });
@@ -370,6 +404,7 @@ export default {
                     // Core or coil still being processed: the shown values are not
                     // for this design yet. The coreProcessed / wound event that ends
                     // the processing simulates again.
+                    useSimulationFindingsStore().clear(this.masStore.$id);
                     this.dataUptoDate = false;
                     this.loading = false;
                 }
@@ -787,6 +822,19 @@ export default {
                         :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
                     />
+                    <!-- Where the winding losses come from (ABT #203): the per-winding
+                         breakdown lives in Advanced mode, so say what the total is made of here. -->
+                    <div
+                        v-if="outputsData.windingLosses != null && outputsData.ohmicLosses != null"
+                        class="coilinfo-loss-breakdown text-left pl-4 pr-4"
+                        :style="[$styleStore.magneticBuilder.inputTextColor, $styleStore.magneticBuilder.infoLabelFontSize]"
+                        :data-cy="dataTestLabel + '-WindingLossesBreakdown'"
+                    >
+                        <span>DC {{ powerLabel(outputsData.ohmicLosses) }}</span>
+                        <span>· skin {{ powerLabel(outputsData.skinLosses) }}</span>
+                        <span>· proximity {{ powerLabel(outputsData.proximityLosses) }}</span>
+                        <span class="coilinfo-loss-breakdown-hint">Per winding: Settings → Advanced mode</span>
+                    </div>
                     <DimensionReadOnly
                         v-tooltip="tooltipsMagneticBuilder.totalLosses"
                         v-if="outputsData.totalLosses != null"
@@ -978,6 +1026,18 @@ export default {
     display: flex;
     flex-direction: column;
     gap: 0.3rem;
+}
+
+.coilinfo-loss-breakdown {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 0.4rem;
+    opacity: 0.85;
+}
+.coilinfo-loss-breakdown-hint {
+    flex-basis: 100%;
+    font-size: 0.9em;
+    opacity: 0.75;
 }
 
 .coilinfo-dimmed {

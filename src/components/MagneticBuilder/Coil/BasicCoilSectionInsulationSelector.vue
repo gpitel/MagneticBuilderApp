@@ -126,7 +126,7 @@ export default {
         bottomOrOuterMarginUpdated(sectionIndex) {
             if (!this.blockingRebounds) {
                 const isMarginHorizontal = effectiveBobbin(this.masStore.mas.magnetic.coil.bobbin).processedDescription.windingWindows[0].sectionsOrientation == "contiguous";
-                this.taskQueueStore.checkIfFits(this.masStore.mas.magnetic.coil.bobbin, this.data.dataPerSection[sectionIndex].topOrLeftMargin, isMarginHorizontal).then((fits) => {
+                this.taskQueueStore.checkIfFits(this.masStore.mas.magnetic.coil.bobbin, this.data.dataPerSection[sectionIndex].bottomOrRightMargin, isMarginHorizontal).then((fits) => {
                     if (fits) {
                         this.$emit('marginUpdated', sectionIndex);
                         this.bottomOrRightMarginErrorMessage = "";

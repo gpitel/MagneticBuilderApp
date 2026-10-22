@@ -2,6 +2,7 @@
 import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import LineVisualizer from '/WebSharedComponents/Common/LineVisualizer.vue'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
+import { describeGraphError } from './graphErrors.js'
 import { defaultOperatingConditions } from '/WebSharedComponents/assets/js/defaults.js'
 </script>
 
@@ -135,7 +136,7 @@ export default {
             })
             this.frequencyData.type = this.$stateStore.graphParameters.xAxisMode == "linear"? "value" : this.$stateStore.graphParameters.xAxisMode;
             this.coreLossesOverFrequencyData[0].type = this.$stateStore.graphParameters.yAxisMode == "linear"? "value" : this.$stateStore.graphParameters.yAxisMode;
-            this.taskQueueStore.sweepCoreLossesOverFrequency(this.masStore.mas.magnetic, this.masStore.mas.inputs.operatingPoints[this.operatingPointIndex], this.$stateStore.graphParameters.minimumFrequency, this.$stateStore.graphParameters.maximumFrequency, this.$stateStore.graphParameters.numberPoints, ambientTemperature, this.$stateStore.graphParameters.xAxisMode, "Core Losses over frequency").then((curve2D) => {
+            this.taskQueueStore.sweepCoreLossesOverFrequency(this.masStore.mas.magnetic, this.masStore.mas.inputs.operatingPoints[this.operatingPointIndex], this.masStore.mas.inputs.designRequirements.topology ?? null, this.$stateStore.graphParameters.minimumFrequency, this.$stateStore.graphParameters.maximumFrequency, this.$stateStore.graphParameters.numberPoints, ambientTemperature, this.$stateStore.graphParameters.xAxisMode, "Core Losses over frequency").then((curve2D) => {
                     this.coreLossesOverFrequencyData[0].data = {
                         x: curve2D.xPoints,
                         y: curve2D.yPoints,
@@ -151,7 +152,7 @@ export default {
             .catch(error => {
                 console.error(error);
                 this.loading = false;
-                this.errorMessage = "Error calculating core losses";
+                this.errorMessage = describeGraphError(error, "the core losses");
                 this.coreLossesOverFrequencyData[0].data = {
                     x: [],
                     y: [],
@@ -173,7 +174,7 @@ export default {
             </div>
             <div :class="$slots.default ? 'col-12 md:col-9 graph-viz-col' : 'col-12 graph-viz-col'">
                 <img :data-cy="dataTestLabel + '-CoreLossesOverFrequency-loading'" v-if="loading" class="mx-auto d-block graph-loading" alt="loading" :src="$settingsStore.loadingGif">
-                <label v-if="errorMessage != ''" :data-cy="dataTestLabel + '-BottomOrRightMarginErrorMessage'" class="text-danger m-0" style="font-size: 0.9em"> {{errorMessage}}</label>
+                <label v-if="errorMessage != ''" :data-cy="dataTestLabel + '-Graph-ErrorMessage'" class="text-danger m-0" style="font-size: 0.9em"> {{errorMessage}}</label>
                 <LineVisualizer 
                     v-show="!loading"
                     :data="coreLossesOverFrequencyData"

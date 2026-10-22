@@ -171,61 +171,61 @@ export const useModelSettingsStore = defineStore("modelSettings", () => {
         if (!isInitialized.value) return
         
         try {
-            const { waitForMkf } = await import('/WebSharedComponents/assets/js/mkfRuntime')
+            const { waitForMkf, updateEngineSettings } = await import('/WebSharedComponents/assets/js/mkfRuntime')
             const mkf = await waitForMkf()
-            
-            const settings = JSON.parse(await mkf.get_settings())
-            
-            // Convert display names to integer indices
-            const magneticFieldStrengthOptions = Object.keys(availableMagneticFieldStrengthModels.value)
-            const fringingEffectOptions = Object.keys(availableFringingEffectModels.value)
-            const reluctanceOptions = Object.keys(availableReluctanceModels.value)
-            const skinEffectOptions = Object.keys(availableWindingSkinEffectModels.value)
-            const proximityEffectOptions = Object.keys(availableWindingProximityEffectModels.value)
-            const strayCapacitanceOptions = Object.keys(availableStrayCapacitanceModels.value)
-            
-            // Only sync valid (non-null) model values
-            
-            if (magneticFieldStrengthModel.value !== null && magneticFieldStrengthModel.value !== undefined) {
-                const index = magneticFieldStrengthOptions.indexOf(magneticFieldStrengthModel.value)
-                if (index >= 0) settings.magneticFieldStrengthModel = index
-            }
-            if (magneticFieldStrengthFringingEffectModel.value !== null && magneticFieldStrengthFringingEffectModel.value !== undefined) {
-                const index = fringingEffectOptions.indexOf(magneticFieldStrengthFringingEffectModel.value)
-                if (index >= 0) settings.magneticFieldStrengthFringingEffectModel = index
-            }
-            if (reluctanceModel.value !== null && reluctanceModel.value !== undefined) {
-                const index = reluctanceOptions.indexOf(reluctanceModel.value)
-                if (index >= 0) settings.reluctanceModel = index
-            }
-            if (coreLossesModel.value !== null && coreLossesModel.value !== undefined) {
-                settings.coreLossesModel = coreLossesModel.value
-            }
-            if (coreTemperatureModel.value !== null && coreTemperatureModel.value !== undefined) {
-                settings.coreTemperatureModel = coreTemperatureModel.value
-            }
-            if (coreThermalResistanceModel.value !== null && coreThermalResistanceModel.value !== undefined) {
-                settings.coreThermalResistanceModel = coreThermalResistanceModel.value
-            }
-            if (windingSkinEffectLossesModel.value !== null && windingSkinEffectLossesModel.value !== undefined) {
-                const index = skinEffectOptions.indexOf(windingSkinEffectLossesModel.value)
-                if (index >= 0) settings.windingSkinEffectLossesModel = index
-            }
-            if (windingProximityEffectLossesModel.value !== null && windingProximityEffectLossesModel.value !== undefined) {
-                const index = proximityEffectOptions.indexOf(windingProximityEffectLossesModel.value)
-                if (index >= 0) settings.windingProximityEffectLossesModel = index
-            }
-            if (strayCapacitanceModel.value !== null && strayCapacitanceModel.value !== undefined) {
-                const index = strayCapacitanceOptions.indexOf(strayCapacitanceModel.value)
-                if (index >= 0) settings.strayCapacitanceModel = index
-            }
-            settings.coilEnableUserWindingLossesModels = coilEnableUserWindingLossesModels.value
 
-            // Sync painter resolution settings
-            settings.painterNumberPointsX = painterNumberPointsX.value
-            settings.painterNumberPointsY = painterNumberPointsY.value
+            // Only the model fields below are changed, inside the settings queue, so a
+            // concurrent writer's fields are not overwritten with a stale copy (ABT #1660).
+            await updateEngineSettings(mkf, (settings) => {
+                // Convert display names to integer indices
+                const magneticFieldStrengthOptions = Object.keys(availableMagneticFieldStrengthModels.value)
+                const fringingEffectOptions = Object.keys(availableFringingEffectModels.value)
+                const reluctanceOptions = Object.keys(availableReluctanceModels.value)
+                const skinEffectOptions = Object.keys(availableWindingSkinEffectModels.value)
+                const proximityEffectOptions = Object.keys(availableWindingProximityEffectModels.value)
+                const strayCapacitanceOptions = Object.keys(availableStrayCapacitanceModels.value)
+            
+                // Only sync valid (non-null) model values
+            
+                if (magneticFieldStrengthModel.value !== null && magneticFieldStrengthModel.value !== undefined) {
+                    const index = magneticFieldStrengthOptions.indexOf(magneticFieldStrengthModel.value)
+                    if (index >= 0) settings.magneticFieldStrengthModel = index
+                }
+                if (magneticFieldStrengthFringingEffectModel.value !== null && magneticFieldStrengthFringingEffectModel.value !== undefined) {
+                    const index = fringingEffectOptions.indexOf(magneticFieldStrengthFringingEffectModel.value)
+                    if (index >= 0) settings.magneticFieldStrengthFringingEffectModel = index
+                }
+                if (reluctanceModel.value !== null && reluctanceModel.value !== undefined) {
+                    const index = reluctanceOptions.indexOf(reluctanceModel.value)
+                    if (index >= 0) settings.reluctanceModel = index
+                }
+                if (coreLossesModel.value !== null && coreLossesModel.value !== undefined) {
+                    settings.coreLossesModel = coreLossesModel.value
+                }
+                if (coreTemperatureModel.value !== null && coreTemperatureModel.value !== undefined) {
+                    settings.coreTemperatureModel = coreTemperatureModel.value
+                }
+                if (coreThermalResistanceModel.value !== null && coreThermalResistanceModel.value !== undefined) {
+                    settings.coreThermalResistanceModel = coreThermalResistanceModel.value
+                }
+                if (windingSkinEffectLossesModel.value !== null && windingSkinEffectLossesModel.value !== undefined) {
+                    const index = skinEffectOptions.indexOf(windingSkinEffectLossesModel.value)
+                    if (index >= 0) settings.windingSkinEffectLossesModel = index
+                }
+                if (windingProximityEffectLossesModel.value !== null && windingProximityEffectLossesModel.value !== undefined) {
+                    const index = proximityEffectOptions.indexOf(windingProximityEffectLossesModel.value)
+                    if (index >= 0) settings.windingProximityEffectLossesModel = index
+                }
+                if (strayCapacitanceModel.value !== null && strayCapacitanceModel.value !== undefined) {
+                    const index = strayCapacitanceOptions.indexOf(strayCapacitanceModel.value)
+                    if (index >= 0) settings.strayCapacitanceModel = index
+                }
+                settings.coilEnableUserWindingLossesModels = coilEnableUserWindingLossesModels.value
 
-            await mkf.set_settings(JSON.stringify(settings))
+                // Sync painter resolution settings
+                settings.painterNumberPointsX = painterNumberPointsX.value
+                settings.painterNumberPointsY = painterNumberPointsY.value
+            })
             
             // Verify the setting was applied
             const verifySettings = JSON.parse(await mkf.get_settings())
@@ -277,10 +277,10 @@ export const useModelSettingsStore = defineStore("modelSettings", () => {
     // Reset to MKF defaults
     async function reset() {
         try {
-            const { waitForMkf } = await import('/WebSharedComponents/assets/js/mkfRuntime')
+            const { waitForMkf, queueEngineSettingsTask } = await import('/WebSharedComponents/assets/js/mkfRuntime')
             const mkf = await waitForMkf()
-            
-            await mkf.reset_settings('')
+
+            await queueEngineSettingsTask(() => mkf.reset_settings(''))
             await loadFromWASM()
             
             // Set winding losses to automatic mode (not manual)

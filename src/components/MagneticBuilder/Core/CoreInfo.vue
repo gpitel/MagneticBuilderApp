@@ -223,7 +223,12 @@ export default {
             };
             
             // Note: Don't clear pending models here - let CoilInfo.vue also use them
-            if (pendingModels) {
+            // The field-strength models are loaded from the engine asynchronously on first open; until
+            // they are, there is nothing to simulate with (MKF throws on a null model name). Their load
+            // resimulates, which runs this again.
+            if (!modelsData.magneticFieldStrength || !modelsData.magneticFieldStrengthFringingEffect) {
+                this.dataUptoDate = false;
+                return;
             }
             const shape = this.masStore.mas.magnetic.core?.functionalDescription?.shape;
             const material = this.masStore.mas.magnetic.core?.functionalDescription?.material;

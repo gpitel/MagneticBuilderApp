@@ -118,6 +118,12 @@ export default {
     watch: {
     },
     mounted () {
+        // The loader turns the loading state on and leaves it to the coil panel to end
+        // it. Only the wound panel did: after a planar design was loaded it stayed on
+        // for good, and the core panel ignores what the user changes while it is on.
+        if (this.$stateStore.loadingDesign) {
+            this.releaseLoadingDesignSoon();
+        }
         this.tryToWind();
         this.assignLocalData(this.masStore.mas.magnetic);
 
@@ -137,6 +143,7 @@ export default {
         this.subscriptions.push(this.masStore.$onAction(({name, args, after}) => {
             after(() => {
                 if (name == "importedMas") {
+                    this.releaseLoadingDesignSoon();
                     this.assignLocalData(this.masStore.mas.magnetic);
                     this.getStackUp(this.masStore.mas.magnetic.coil);
                     this.tryToWind();
@@ -183,9 +190,17 @@ export default {
     },
     beforeUnmount () {
         if (this._windTimer) clearTimeout(this._windTimer);
+        if (this._loadingTimer) clearTimeout(this._loadingTimer);
         this.subscriptions.forEach((subscription) => {subscription();})
     },
     methods: {
+        releaseLoadingDesignSoon() {
+            if (this._loadingTimer) clearTimeout(this._loadingTimer);
+            this._loadingTimer = setTimeout(() => {
+                this.$stateStore.loadingDesign = false;
+                this._loadingTimer = null;
+            }, 2000);
+        },
         getWindingIndex(coil, windinName) {
             let foundWindingIndex = null;
             coil.functionalDescription.forEach((winding, windingIndex) => {
@@ -218,54 +233,49 @@ export default {
         wind() {
             this.$emit("fits", true);
 
-            this.taskQueueStore.getSettings().then((settings) => {
+            this.taskQueueStore.updateSettings((settings) => {
                 settings["coilMaximumLayersPlanar"] = 24;
-                this.taskQueueStore.setSettings(settings).then(() => {
-                    const inputCoil = deepCopy(this.masStore.mas.magnetic.coil);
+            }).then(() => {
+                const inputCoil = deepCopy(this.masStore.mas.magnetic.coil);
 
-                    const stackUp = [];
-                    this.localData.stackUp.split('').forEach((char, index) => {
-                        stackUp.push(Number(char) - 1);
-                    });
+                const stackUp = [];
+                this.localData.stackUp.split('').forEach((char, index) => {
+                    stackUp.push(Number(char) - 1);
+                });
 
-                    this.taskQueueStore.generateBobbinFromCoreShape(this.masStore.mas.magnetic.core, "Printed").then((bobbin) => {
-                        // Set sectionsAlignment from localData FIRST (user's current selection takes priority)
-                        if (bobbin?.processedDescription?.windingWindows != null && this.localData.sectionsAlignment != null) {
-                            bobbin.processedDescription.windingWindows.forEach((window) => {
-                                window.sectionsAlignment = this.localData.sectionsAlignment;
-                            });
-                        }
-                        
-                        // Preserve other windingWindows settings from original bobbin (only if not set in localData)
-                        const originalWindingWindows = this.masStore.mas.magnetic.coil.bobbin?.processedDescription?.windingWindows;
-                        if (originalWindingWindows != null && bobbin?.processedDescription?.windingWindows != null) {
-                            bobbin.processedDescription.windingWindows.forEach((window, index) => {
-                                if (originalWindingWindows[index] != null) {
-                                    // Only preserve sectionsOrientation, not sectionsAlignment (which comes from localData)
-                                    if (originalWindingWindows[index].sectionsOrientation != null && window.sectionsOrientation == null) {
-                                        window.sectionsOrientation = originalWindingWindows[index].sectionsOrientation;
-                                    }
+                this.taskQueueStore.generateBobbinFromCoreShape(this.masStore.mas.magnetic.core, "Printed").then((bobbin) => {
+                    // Set sectionsAlignment from localData FIRST (user's current selection takes priority)
+                    if (bobbin?.processedDescription?.windingWindows != null && this.localData.sectionsAlignment != null) {
+                        bobbin.processedDescription.windingWindows.forEach((window) => {
+                            window.sectionsAlignment = this.localData.sectionsAlignment;
+                        });
+                    }
+                    
+                    // Preserve other windingWindows settings from original bobbin (only if not set in localData)
+                    const originalWindingWindows = this.masStore.mas.magnetic.coil.bobbin?.processedDescription?.windingWindows;
+                    if (originalWindingWindows != null && bobbin?.processedDescription?.windingWindows != null) {
+                        bobbin.processedDescription.windingWindows.forEach((window, index) => {
+                            if (originalWindingWindows[index] != null) {
+                                // Only preserve sectionsOrientation, not sectionsAlignment (which comes from localData)
+                                if (originalWindingWindows[index].sectionsOrientation != null && window.sectionsOrientation == null) {
+                                    window.sectionsOrientation = originalWindingWindows[index].sectionsOrientation;
                                 }
-                            });
-                        }
-                        
-                        inputCoil.bobbin = bobbin;
+                            }
+                        });
+                    }
+                    
+                    inputCoil.bobbin = bobbin;
 
-                        this.taskQueueStore.windPlanar(inputCoil, stackUp, this.localData.borderToWireDistance, this.localData.clearancePerWinding, this.localData.insulationThicknessPerLayer, this.localData.coreToLayerDistance)
-                        .then((coil) => {
-                            this.masStore.mas.magnetic.coil = coil;
-                            this.assignLocalData(this.masStore.mas.magnetic);
-                            this.historyStore.addToHistory(this.masStore.mas);
-                            this.tryingToSend = false;
-                            this.taskQueueStore.checkIfSectionsAndLayersFit(coil).then((fits) => {
-                                this.$emit("fits", fits);
-                            })
+                    this.taskQueueStore.windPlanar(inputCoil, stackUp, this.localData.borderToWireDistance, this.localData.clearancePerWinding, this.localData.insulationThicknessPerLayer, this.localData.coreToLayerDistance)
+                    .then((coil) => {
+                        this.masStore.mas.magnetic.coil = coil;
+                        this.assignLocalData(this.masStore.mas.magnetic);
+                        this.historyStore.addToHistory(this.masStore.mas);
+                        this.tryingToSend = false;
+                        this.taskQueueStore.checkIfSectionsAndLayersFit(coil).then((fits) => {
+                            this.$emit("fits", fits);
+                        })
 
-                        })
-                        .catch(error => {
-                            this.tryingToSend = false;
-                            console.error(error);
-                        })
                     })
                     .catch(error => {
                         this.tryingToSend = false;
@@ -527,11 +537,6 @@ export default {
                         :backgroundColor="$styleStore.magneticBuilder.main['background-color'] || $styleStore.magneticBuilder.main['background'] || 'var(--p-dark)'"
                         :textColor="$styleStore.magneticBuilder.inputTextColor?.color || 'var(--p-white)'"
                         :buttonStyle="$styleStore.magneticBuilder.coilVisualizerButton"
-                        :insulationColor="$styleStore.magneticBuilder.painterColorInsulation || '0xfff05b'"
-                        :marginColor="$styleStore.magneticBuilder.painterColorMargin || '0xfff05b'"
-                        :spacerColor="$styleStore.magneticBuilder.painterColorSpacer || '0x3b3b3b'"
-                        :ferriteColor="$styleStore.magneticBuilder.painterColorFerrite || '0x7b7c7d'"
-                        :copperColor="$styleStore.magneticBuilder.painterColorCopper || '0xb87333'"
                         :drawSpacer="$styleStore.magneticBuilder.painterDrawSpacer !== undefined ? $styleStore.magneticBuilder.painterDrawSpacer : true"
                         :enableTemperaturePlot="enableTemperaturePlot"
                         @plotModeChange="$emit('plotModeChange', $event)"

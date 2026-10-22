@@ -463,8 +463,7 @@ export default {
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.turnsRatio"
                             class="text-left"
-                            :name="'T'"
-                            :subscriptName="'ratio'"
+                            :name="'Np/Ns'"
                             :unit="null"
                             :dataTestLabel="dataTestLabel + '-TurnsRatio'"
                             :numberDecimals="2"
@@ -557,7 +556,7 @@ export default {
                         v-tooltip="tooltipsMagneticBuilder.turnsRatio"
                         class="text-left pl-4 pr-4"
                         v-if="windingIndex > 0"
-                        :name="'Turns Ratio'"
+                        :name="'Turns ratio (Np/Ns)'"
                         :unit="null"
                         :dataTestLabel="dataTestLabel + '-TurnsRatio'"
                         :numberDecimals="2"

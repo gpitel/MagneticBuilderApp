@@ -5,6 +5,7 @@ import 'primeflex/primeflex.css'
 import router from "./router";
 import { createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
+import { piniaActionGuard } from '/WebSharedComponents/assets/js/piniaActionGuard.js'
 import VueCookies from 'vue3-cookies'
 import PrimeVueTooltip from 'primevue/tooltip'
 import axios from "axios";
@@ -24,6 +25,7 @@ checkAndClearOutdatedStores();
 const axiosInstance = axios.create()
 
 const pinia = createPinia()
+pinia.use(piniaActionGuard)
 pinia.use(piniaPluginPersistedstate)
 const app = createApp(App);
 app.use(router);

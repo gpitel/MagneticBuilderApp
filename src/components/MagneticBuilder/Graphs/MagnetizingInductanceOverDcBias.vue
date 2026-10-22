@@ -2,6 +2,7 @@
 import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import LineVisualizer from '/WebSharedComponents/Common/LineVisualizer.vue'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
+import { describeGraphError } from './graphErrors.js'
 import { defaultOperatingConditions } from '/WebSharedComponents/assets/js/defaults.js'
 </script>
 
@@ -55,6 +56,7 @@ export default {
 
         return {
             taskQueueStore,
+            errorMessage: "",
             magnetizingInductanceOverDcBiasData,
             dcBiasData,
             forceUpdate,
@@ -133,6 +135,7 @@ export default {
             }
             this.dcBiasData.type = this.$stateStore.graphParameters.xAxisMode == "linear"? "value" : this.$stateStore.graphParameters.xAxisMode;
             this.magnetizingInductanceOverDcBiasData[0].type = this.$stateStore.graphParameters.yAxisMode == "linear"? "value" : this.$stateStore.graphParameters.yAxisMode;
+            this.errorMessage = "";
             this.taskQueueStore.sweepMagnetizingInductanceOverDcBias(this.masStore.mas.magnetic, this.$stateStore.graphParameters.minimumDcBias, this.$stateStore.graphParameters.maximumDcBias, this.$stateStore.graphParameters.numberPoints, ambientTemperature, this.$stateStore.graphParameters.xAxisMode, "Magnetizing Inductance over Dc Bias").then((curve2D) => {
                 this.magnetizingInductanceOverDcBiasData[0].data = {
                     x: curve2D.xPoints,
@@ -147,6 +150,7 @@ export default {
             })
             .catch(error => {
                 console.error(error);
+                this.errorMessage = describeGraphError(error, "the magnetizing inductance");
                 this.loading = false;
                 this.magnetizingInductanceOverDcBiasData[0].data = {
                     x: [],
@@ -169,6 +173,7 @@ export default {
             </div>
             <div :class="$slots.default ? 'col-12 md:col-9 graph-viz-col' : 'col-12 graph-viz-col'">
                 <img :data-cy="dataTestLabel + '-MagnetizingInductancesOverDcBias-loading'" v-if="loading" class="mx-auto d-block graph-loading" alt="loading" :src="$settingsStore.loadingGif">
+                <label v-if="errorMessage != ''" :data-cy="dataTestLabel + '-Graph-ErrorMessage'" class="text-danger m-0 d-block" style="font-size: 0.9em">{{ errorMessage }}</label>
                 <LineVisualizer 
                     v-show="!loading"
                     :data="magnetizingInductanceOverDcBiasData"

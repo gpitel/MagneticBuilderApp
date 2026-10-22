@@ -4,6 +4,7 @@ import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import { removeTrailingZeroes, deepCopy, isMobile, toCamelCase } from '/WebSharedComponents/assets/js/utils.js'
 import LineVisualizer from '/WebSharedComponents/Common/LineVisualizer.vue'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
+import { describeGraphError } from './graphErrors.js'
 import { defaultOperatingConditions } from '/WebSharedComponents/assets/js/defaults.js'
 </script>
 
@@ -56,6 +57,7 @@ export default {
 
         return {
             taskQueueStore,
+            errorMessage: "",
             resistancesOverFrequencyData,
             frequencyData,
             forceUpdate,
@@ -132,6 +134,7 @@ export default {
 
             this.frequencyData.type = this.$stateStore.graphParameters.xAxisMode == "linear"? "value" : this.$stateStore.graphParameters.xAxisMode;
             this.resistancesOverFrequencyData[0].type = this.$stateStore.graphParameters.yAxisMode == "linear"? "value" : this.$stateStore.graphParameters.yAxisMode;
+            this.errorMessage = "";
             this.taskQueueStore.sweepResistanceOverFrequency(this.masStore.mas.magnetic, this.$stateStore.graphParameters.minimumFrequency, this.$stateStore.graphParameters.maximumFrequency, this.$stateStore.graphParameters.numberPoints, ambientTemperature, this.$stateStore.graphParameters.xAxisMode, "Resistance over frequency")
             .then((curve2D) => {
                 this.resistancesOverFrequencyData[0].data = {
@@ -147,6 +150,7 @@ export default {
             })
             .catch(error => {
                 console.error(error);
+                this.errorMessage = describeGraphError(error, "the resistance");
                 this.loading = false;
                 this.resistancesOverFrequencyData[0].data = {
                     x: [],
@@ -170,6 +174,7 @@ export default {
             </div>
             <div :class="$slots.default ? 'col-12 md:col-9 graph-viz-col' : 'col-12 graph-viz-col'">
                 <img :data-cy="dataTestLabel + '-ResistancesOverFrequency-loading'" v-if="loading" class="mx-auto d-block graph-loading" alt="loading" :src="$settingsStore.loadingGif">
+                <label v-if="errorMessage != ''" :data-cy="dataTestLabel + '-Graph-ErrorMessage'" class="text-danger m-0 d-block" style="font-size: 0.9em">{{ errorMessage }}</label>
                 <LineVisualizer 
                     v-show="!loading"
                     :data="resistancesOverFrequencyData"

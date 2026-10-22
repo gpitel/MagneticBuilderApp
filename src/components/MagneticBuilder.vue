@@ -5,6 +5,7 @@ import AdvancedCoreSelector from './MagneticBuilder/Core/AdvancedCoreSelector.vu
 import AdvancedCoilInfo from './MagneticBuilder/Coil/AdvancedCoilInfo.vue'
 import { recordDesign } from '/WebSharedComponents/assets/js/telemetry.js'
 import { useMagneticBuilderSettingsStore } from '../stores/magneticBuilderSettings'
+import { useSimulationFindingsStore } from '../stores/simulationFindings'
 
 </script>
 
@@ -127,10 +128,34 @@ export default {
             // unusual or failed calculation on an otherwise fully-specified
             // design should not lock the user out of Continue (ABT #1347) —
             // it should just tell them plainly what happened.
-            calculationWarning: null,
+            // One entry per taskQueue action that is failing right now: action -> message.
+            calculationWarnings: {},
         }
     },
     computed: {
+        // The distinct messages of the actions that are failing, in the order they failed.
+        calculationIssues() {
+            return [...new Set(Object.values(this.calculationWarnings))];
+        },
+        // MKF's findings on the last simulation (ABT #1855), one group per operating point, the
+        // selected point first: a point that saturates or whose voltage is not balanced still gets
+        // its numbers, and this is where it says so.
+        simulationFindingsByPoint() {
+            const findings = useSimulationFindingsStore().of(this.masStore.$id);
+            const groups = new Map();
+            for (const finding of findings) {
+                const index = finding.operatingPointIndex;
+                if (!groups.has(index)) {
+                    const name = finding.operatingPointName ?? this.masStore.mas.inputs?.operatingPoints?.[index]?.name ?? `Operating point ${index + 1}`;
+                    groups.set(index, { index, name, messages: [] });
+                }
+                // MKF's message opens with the point it is about; the group heading names it already.
+                const message = finding.message.replace(/^At operating point \d+( \('[^']*'\))?(: |, )/, '');
+                groups.get(index).messages.push(message.charAt(0).toUpperCase() + message.slice(1));
+            }
+            return [...groups.values()].sort((a, b) =>
+                (a.index == this.operatingPointIndex ? -1 : 0) - (b.index == this.operatingPointIndex ? -1 : 0) || a.index - b.index);
+        },
         /**
          * The layout on screen (ABT #1121): whichever the user picked in
          * Settings. Layouts arrange the same components with the same props —
@@ -234,10 +259,11 @@ export default {
                     return;
                 }
                 if (args.length >= 2 && args[0] === false && typeof args[1] === 'string' && args[1].length > 0) {
-                    this.calculationWarning = { action: name, message: args[1] };
+                    this.calculationWarnings = { ...this.calculationWarnings, [name]: args[1] };
                 }
-                else if (args.length >= 1 && args[0] === true && this.calculationWarning?.action === name) {
-                    this.calculationWarning = null;
+                else if (args.length >= 1 && args[0] === true && name in this.calculationWarnings) {
+                    const { [name]: solved, ...stillFailing } = this.calculationWarnings;
+                    this.calculationWarnings = stillFailing;
                 }
             });
         }));
@@ -303,7 +329,7 @@ export default {
         // whether the last calculation on those inputs came out clean. A
         // design can be fully specified and still produce an extreme or
         // failed calculation (e.g. a turns count that saturates the core);
-        // that is surfaced separately via `calculationWarning`, and does not
+        // that is surfaced separately via `calculationWarnings`, and does not
         // belong here (ABT #1347 — this used to also gate on
         // coil.turnsDescription, which is a CALCULATION OUTPUT, so a design
         // that was otherwise complete could get silently stuck on the
@@ -377,9 +403,48 @@ export default {
              turns/wire/core combination) is shown here so the user knows what happened,
              but it does NOT gate Continue -- the design's inputs are still valid, only
              this specific derived result failed (ABT #1347). -->
-        <div v-if="calculationWarning" class="alert alert-danger py-2 px-3 mb-2" :title="calculationWarning.message">
-            <i class="pi pi-exclamation-triangle me-2"></i>
-            <strong>Calculation issue:</strong> {{calculationWarning.message}}
+        <div
+            v-if="calculationIssues.length > 0"
+            :data-cy="dataTestLabel + '-CalculationIssue'"
+            class="alert alert-danger py-2 px-3 mb-2 d-flex align-items-start"
+            :title="calculationIssues.join('\n')"
+        >
+            <span class="flex-grow-1">
+                <i class="pi pi-exclamation-triangle me-2"></i>
+                <strong>Calculation issue:</strong>
+                <!-- Every action that is failing, not only the last one to report: the
+                     reason MKF gives must not be replaced by a later, vaguer failure. -->
+                <template v-if="calculationIssues.length == 1"> {{calculationIssues[0]}}</template>
+                <ul v-else class="mb-0 ps-3">
+                    <li v-for="issue in calculationIssues" :key="issue">{{issue}}</li>
+                </ul>
+            </span>
+            <!-- Dismissed until the next failure: a new one fills calculationWarnings again. -->
+            <button
+                type="button"
+                :data-cy="dataTestLabel + '-CalculationIssue-dismiss'"
+                class="mb-calc-issue-dismiss ms-2"
+                aria-label="Dismiss"
+                title="Dismiss"
+                @click="calculationWarnings = {}"
+            >
+                <i class="pi pi-times"></i>
+            </button>
+        </div>
+        <div
+            v-if="simulationFindingsByPoint.length > 0"
+            :data-cy="dataTestLabel + '-SimulationFindings'"
+            class="alert alert-warning py-2 px-3 mb-2"
+            role="alert"
+        >
+            <div v-for="group in simulationFindingsByPoint" :key="group.index" :data-cy="dataTestLabel + '-SimulationFindings-' + group.index">
+                <i class="pi pi-exclamation-triangle me-2"></i>
+                <strong>{{group.name}}<template v-if="group.index == operatingPointIndex"> (shown)</template>:</strong>
+                <template v-if="group.messages.length == 1"> {{group.messages[0]}}</template>
+                <ul v-else class="mb-1 ps-4">
+                    <li v-for="message in group.messages" :key="message">{{message}}</li>
+                </ul>
+            </div>
         </div>
         <div
             class="row"
@@ -409,3 +474,18 @@ export default {
         />
     </div>
 </template>
+
+<style scoped>
+.mb-calc-issue-dismiss {
+    background: none;
+    border: none;
+    color: inherit;
+    padding: 0 0.25rem;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0.8;
+}
+.mb-calc-issue-dismiss:hover {
+    opacity: 1;
+}
+</style>
