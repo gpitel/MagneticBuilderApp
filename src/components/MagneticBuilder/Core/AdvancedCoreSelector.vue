@@ -9,6 +9,8 @@ import { useTaskQueueStore } from '../../../stores/taskQueue'
 </script>
 
 <script>
+// Warnings and errors go to the host's log when it has one (notices.js).
+import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js/notices.js'
 
 export default {
     props: {
@@ -90,7 +92,15 @@ export default {
     beforeUnmount () {
         this.subscriptions.forEach((subscription) => {subscription();})
     },
+    watch: {
+        errorMessage(message) {
+            reportNotice('ERROR', 'Core', message);
+        },
+    },
     methods: {
+        inlineNotices() {
+            return noticesShownInline();
+        },
         customizedCore(customCore) {
             this.masStore.mas.magnetic.core = customCore;
         },
@@ -147,7 +157,7 @@ export default {
                 :core="localCore"
                 :enableSimulation="true"
             />
-            <label class="text-danger col-12 pt-1 advcore-error">{{errorMessage}}</label>
+            <label v-if="inlineNotices()" class="text-danger col-12 pt-1 advcore-error">{{errorMessage}}</label>
         </div>
     </div>
 </template>

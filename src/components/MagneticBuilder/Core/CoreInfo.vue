@@ -8,6 +8,8 @@ import { useModelSettingsStore } from '../../../stores/modelSettings'
 </script>
 
 <script>
+// Warnings and errors go to the host's log when it has one (notices.js).
+import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js/notices.js'
 
 export default {
     props: {
@@ -99,6 +101,9 @@ export default {
         },
     },
     watch: {
+        simulationError(message) {
+            reportNotice('ERROR', 'Core info', message);
+        },
         'masStore.mas.magnetic.core.processedDescription.effectiveParameters': {
             deep: true,
             handler() {
@@ -202,6 +207,9 @@ export default {
         this.subscriptions.forEach((subscription) => {subscription();})
     },
     methods: {
+        inlineNotices() {
+            return noticesShownInline();
+        },
         /** Take the engine's processed parameters for the core now in the store. */
         syncEffectiveParametersFromStore() {
             const stored = this.masStore.mas?.magnetic?.core?.processedDescription?.effectiveParameters;
@@ -279,7 +287,7 @@ export default {
         </div>
         <div class="coreinfo-body">
             <h6
-                v-if="simulationError"
+                v-if="inlineNotices() && simulationError"
                 :data-cy="dataTestLabel + '-CoreInfo-SimulationError'"
                 class="text-danger my-2"
             >{{ simulationError }}</h6>

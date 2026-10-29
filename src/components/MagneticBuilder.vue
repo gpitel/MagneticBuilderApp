@@ -10,6 +10,8 @@ import { useSimulationFindingsStore } from '../stores/simulationFindings'
 </script>
 
 <script>
+// Warnings and errors go to the host's log when it has one (notices.js).
+import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js/notices.js'
 // Imported under a different name than the computed below: a module binding is
 // exposed to the template as $setup, and $setup WINS over an Options API member
 // of the same name — with both called `layoutComponent`, `:is` received the
@@ -144,17 +146,20 @@ export default {
             const findings = useSimulationFindingsStore().of(this.masStore.$id);
             const groups = new Map();
             for (const finding of findings) {
-                const index = finding.operatingPointIndex;
+                // A finding about the whole design (an edgewise bend tighter than the wire's mandrel) has no point.
+                const index = finding.operatingPointIndex ?? null;
                 if (!groups.has(index)) {
-                    const name = finding.operatingPointName ?? this.masStore.mas.inputs?.operatingPoints?.[index]?.name ?? `Operating point ${index + 1}`;
+                    const name = index == null ? 'Design'
+                        : finding.operatingPointName ?? this.masStore.mas.inputs?.operatingPoints?.[index]?.name ?? `Operating point ${index + 1}`;
                     groups.set(index, { index, name, messages: [] });
                 }
                 // MKF's message opens with the point it is about; the group heading names it already.
                 const message = finding.message.replace(/^At operating point \d+( \('[^']*'\))?(: |, )/, '');
                 groups.get(index).messages.push(message.charAt(0).toUpperCase() + message.slice(1));
             }
-            return [...groups.values()].sort((a, b) =>
-                (a.index == this.operatingPointIndex ? -1 : 0) - (b.index == this.operatingPointIndex ? -1 : 0) || a.index - b.index);
+            // The design's own findings first, then the selected point, then the rest in order.
+            const rank = (group) => group.index == null ? -2 : group.index == this.operatingPointIndex ? -1 : 0;
+            return [...groups.values()].sort((a, b) => rank(a) - rank(b) || (a.index ?? 0) - (b.index ?? 0));
         },
         /**
          * The layout on screen (ABT #1121): whichever the user picked in
@@ -259,6 +264,9 @@ export default {
                     return;
                 }
                 if (args.length >= 2 && args[0] === false && typeof args[1] === 'string' && args[1].length > 0) {
+                    if (this.calculationWarnings[name] !== args[1]) {
+                        reportNotice('ERROR', 'Builder', args[1]);
+                    }
                     this.calculationWarnings = { ...this.calculationWarnings, [name]: args[1] };
                 }
                 else if (args.length >= 1 && args[0] === true && name in this.calculationWarnings) {
@@ -321,6 +329,9 @@ export default {
         this.subscriptions.forEach((unsubscribe) => unsubscribe());
     },
     methods: {
+        inlineNotices() {
+            return noticesShownInline();
+        },
         insertIntermediateMas() {
             // Intermediate working state — the builder design as the user leaves it.
             recordDesign({ event_type: 'builder_snapshot', source: 'builder', mas: this.masStore.mas });
@@ -404,7 +415,7 @@ export default {
              but it does NOT gate Continue -- the design's inputs are still valid, only
              this specific derived result failed (ABT #1347). -->
         <div
-            v-if="calculationIssues.length > 0"
+            v-if="inlineNotices() && calculationIssues.length > 0"
             :data-cy="dataTestLabel + '-CalculationIssue'"
             class="alert alert-danger py-2 px-3 mb-2 d-flex align-items-start"
             :title="calculationIssues.join('\n')"
@@ -432,7 +443,7 @@ export default {
             </button>
         </div>
         <div
-            v-if="simulationFindingsByPoint.length > 0"
+            v-if="inlineNotices() && simulationFindingsByPoint.length > 0"
             :data-cy="dataTestLabel + '-SimulationFindings'"
             class="alert alert-warning py-2 px-3 mb-2"
             role="alert"

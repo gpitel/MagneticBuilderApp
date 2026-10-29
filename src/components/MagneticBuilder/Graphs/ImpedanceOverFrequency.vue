@@ -9,6 +9,8 @@ import { describeGraphError, describeCurveDataLimits } from './graphErrors.js'
 </script>
 
 <script>
+// Warnings and errors go to the host's log when it has one (notices.js).
+import { reportNotice } from '/WebSharedComponents/assets/js/notices.js'
 
 export default {
     props: {
@@ -106,6 +108,9 @@ export default {
         }
     },
     watch: {
+        errorMessage(message) {
+            reportNotice('ERROR', 'Impedance Over Frequency graph', message);
+        },
         '$stateStore.graphParameters': {
             handler(newValue, oldValue) {
                 this.loading = true;
@@ -209,6 +214,7 @@ export default {
             <div :class="$slots.default ? 'col-12 md:col-9 graph-viz-col' : 'col-12 graph-viz-col'">
 
                 <img :data-cy="dataTestLabel + '-ResistancesOverFrequency-loading'" v-if="loading" class="mx-auto d-block graph-loading" alt="loading" :src="$settingsStore.loadingGif">
+                <!-- An empty chart says why, even when the reason also goes to the host's log (Alf, 2026-10-23). -->
                 <label v-if="errorMessage != ''" :data-cy="dataTestLabel + '-Graph-ErrorMessage'" class="text-danger m-0" style="font-size: 0.9em"> {{errorMessage}}</label>
                 <LineVisualizer 
                     v-else

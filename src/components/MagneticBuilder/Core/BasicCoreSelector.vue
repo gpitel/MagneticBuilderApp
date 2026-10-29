@@ -17,6 +17,8 @@ import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js
 </script>
 
 <script>
+// Warnings and errors go to the host's log when it has one (notices.js).
+import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js/notices.js'
 // In the plain block, not <script setup>: methods below call it, and an Options
 // API method cannot see a <script setup> binding.
 import { applyAdvisedCore } from './applyAdvisedCore.js'
@@ -202,6 +204,9 @@ export default {
         },
     },
     watch: {
+        errorMessage(message) {
+            reportNotice('ERROR', 'Core', message);
+        },
         loading(value) {
             this.taskQueueStore.coreAdviseBusy = value;
         },
@@ -347,6 +352,9 @@ export default {
         this.subscriptions.forEach((subscription) => {subscription();})
     },
     methods: {
+        inlineNotices() {
+            return noticesShownInline();
+        },
         isStackable(shape) {
             // Accept an explicit shape so callers in mid-transition (shape just
             // swapped in a local mas copy but not yet committed to the store)
@@ -940,7 +948,7 @@ export default {
                     @adjustTurnsToInductance="adjustTurnsToInductance"
                 />
                 <label v-if="infoMessage" :data-cy="dataTestLabel + '-Core-adjust-info'" class="text-success col-12 pt-1" style="font-size: 0.7em">{{infoMessage}}</label>
-                <label class="text-danger col-12 pt-1" style="font-size: 0.7em">{{errorMessage}}</label>
+                <label v-if="inlineNotices()" class="text-danger col-12 pt-1" style="font-size: 0.7em">{{errorMessage}}</label>
             </div>
         </div>
     </div>

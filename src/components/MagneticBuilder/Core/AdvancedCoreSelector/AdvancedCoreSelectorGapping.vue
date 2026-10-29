@@ -16,6 +16,8 @@ import { useTaskQueueStore } from '../../../../stores/taskQueue'
 </script>
 
 <script>
+// Warnings and errors go to the host's log when it has one (notices.js).
+import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js/notices.js'
 
 export default {
     emits: ["errorInDimensions", "renderSuccess"],
@@ -92,7 +94,15 @@ export default {
     beforeUnmount() {
         this.subscriptions.forEach((unsubscribe) => unsubscribe());
     },
+    watch: {
+        errorMessage(message) {
+            reportNotice('ERROR', 'Gapping', message);
+        },
+    },
     methods: {
+        inlineNotices() {
+            return noticesShownInline();
+        },
         getEngineConstants() {
             this.taskQueueStore.getConstants().then((constants) => {
                 this.engineConstants['residualGap'] = constants['residualGap'];
@@ -641,7 +651,7 @@ export default {
                     />
                 </div>
             </div>
-            <label class="text-danger col-12 pt-1" style="font-size: 1em">{{errorMessage}}</label>
+            <label v-if="inlineNotices()" class="text-danger col-12 pt-1" style="font-size: 1em">{{errorMessage}}</label>
 
         </div>
     </div>

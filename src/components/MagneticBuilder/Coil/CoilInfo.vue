@@ -10,6 +10,8 @@ import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
 </script>
 
 <script>
+// Warnings and errors go to the host's log when it has one (notices.js).
+import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js/notices.js'
 
 export default {
     props: {
@@ -127,6 +129,9 @@ export default {
         },
     },
     watch: {
+        simulationError(message) {
+            reportNotice('ERROR', 'Coil info', message);
+        },
         'operatingPointIndex': {
             handler(newValue, oldValue) {
                 this.updateFields(this.masStore.mas.outputs);
@@ -201,6 +206,9 @@ export default {
         this.subscriptions.forEach((subscription) => {subscription();})
     },
     methods: {
+        inlineNotices() {
+            return noticesShownInline();
+        },
         waitForModelSettingsAndSimulate() {
             // Wait for modelSettings to be initialized AND have valid models before calculating
             if (this.modelSettingsStore.isInitialized &&
@@ -439,7 +447,7 @@ export default {
 
         <div class="coilinfo-body">
             <h6
-                v-if="simulationError"
+                v-if="inlineNotices() && simulationError"
                 :data-cy="dataTestLabel + '-CoilInfo-SimulationError'"
                 class="text-danger my-2"
             >{{ simulationError }}</h6>

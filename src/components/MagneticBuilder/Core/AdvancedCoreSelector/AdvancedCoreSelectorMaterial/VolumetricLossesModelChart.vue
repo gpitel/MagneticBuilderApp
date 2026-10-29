@@ -4,6 +4,8 @@ import { useTaskQueueStore } from '../../../../../stores/taskQueue'
 </script>
 
 <script>
+// Warnings and errors go to the host's log when it has one (notices.js).
+import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js/notices.js'
 // ABT #166: display-only Pv(f) curves computed BY THE ENGINE for the
 // material's active loss model. This is what renders core losses for
 // materials whose model has no measured points and no frontend-displayable
@@ -60,7 +62,15 @@ export default {
     mounted() {
         this.sample();
     },
+    watch: {
+        errorMessage(message) {
+            reportNotice('ERROR', 'Volumetric losses chart', message);
+        },
+    },
     methods: {
+        inlineNotices() {
+            return noticesShownInline();
+        },
         async sample() {
             this.errorMessage = "";
             try {
@@ -111,5 +121,5 @@ export default {
         :visualizerLineColor="$styleStore.magneticBuilder.main.color"
         :visualizerTextColor="$styleStore.magneticBuilder.main.color"
     />
-    <label v-if="errorMessage != ''" class="text-danger col-12 pt-1" style="font-size: 0.9em">{{ errorMessage }}</label>
+    <label v-if="inlineNotices() && errorMessage != ''" class="text-danger col-12 pt-1" style="font-size: 0.9em">{{ errorMessage }}</label>
 </template>

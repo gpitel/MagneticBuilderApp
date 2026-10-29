@@ -16,6 +16,8 @@ import { useTaskQueueStore } from '../../../stores/taskQueue'
 </script>
 
 <script>
+// Warnings and errors go to the host's log when it has one (notices.js).
+import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js/notices.js'
 
 export default {
     props: {
@@ -175,6 +177,9 @@ export default {
         },
     },
     watch: {
+        errorMessage(message) {
+            reportNotice('ERROR', 'Wire', message);
+        },
         loading(value) {
             this.taskQueueStore.wireAdviseBusy = value;
         },
@@ -247,6 +252,9 @@ export default {
         this.subscriptions.forEach((subscription) => {subscription();})
     },
     methods: {
+        inlineNotices() {
+            return noticesShownInline();
+        },
         cleanCoil() {
             this.masStore.mas.magnetic.coil.turnsDescription = null;
             this.masStore.mas.magnetic.coil.layersDescription = null;
@@ -934,7 +942,7 @@ export default {
                     @loadCore="loadWire"
                 />
 
-                <label class="text-danger col-12 pt-1" style="font-size: 1em">{{errorMessage}}</label>
+                <label v-if="inlineNotices()" class="text-danger col-12 pt-1" style="font-size: 1em">{{errorMessage}}</label>
             </div>
         </div>
     </div>
