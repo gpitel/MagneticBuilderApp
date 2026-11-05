@@ -63,6 +63,8 @@ export default {
             required: true,
         },
         visible: { type: Boolean, default: false },
+        /** The engine's message when it could not build the rows; shown instead of the table. */
+        loadError: { type: String, default: null },
     },
     data() {
         return {
@@ -177,7 +179,11 @@ export default {
             </div>
         </template>
         <div class="px-2 py-2 shape-table-wrapper" :data-cy="dataTestLabel + '-ShapeTable'">
+            <p v-if="loadError != null" class="shape-table-error mb-0" :data-cy="dataTestLabel + '-ShapeTable-error'">
+                The core shapes table could not be built: {{ loadError }}
+            </p>
             <FilterableDataTable
+                v-else
                 ref="coreShapeTable"
                 :key="activeUnitSystem"
                 :data="displayRows"
@@ -236,6 +242,11 @@ export default {
         --fdt-input-border: var(--p-secondary);
         --fdt-accent: var(--p-primary);
         --fdt-accent-rgb: var(--p-primary-rgb);
+    }
+
+    .shape-table-wrapper .shape-table-error {
+        color: var(--p-danger);
+        white-space: pre-wrap;
     }
 
     .shape-table-wrapper .shape-select-cell {

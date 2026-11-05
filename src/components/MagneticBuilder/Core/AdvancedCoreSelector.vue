@@ -119,7 +119,7 @@ export default {
             this.$stateStore.magneticBuilder.mode.core = this.$stateStore.MagneticBuilderModes.Basic;
         },
         errorInDimensions() {
-            this.errorMessage = "There is an error in the dimensions, please review them";
+            this.errorMessage = "The core cannot be drawn with these dimensions: one of them is not valid (zero, negative, or too large for the rest of the shape). Review the dimensions.";
         },
         clearError() {
             this.errorMessage = "";

@@ -255,7 +255,7 @@ export default {
 
                 })
                 .catch(error => {
-                    this.errorMessage = "Our advisers could not find a wire. Sorry, you are on your own!";
+                    this.errorMessage = "The wire adviser found no track for this winding that fits. Choose the track width and thickness by hand.";
                     setTimeout(() => {this.errorMessage = ""}, 10000);
                     this.loading = false;
                     console.error(error);
@@ -291,7 +291,7 @@ export default {
 
                 })
                 .catch(error => {
-                    this.errorMessage = "Our advisers could not find a wire. Sorry, you are on your own!";
+                    this.errorMessage = "The wire adviser found no track for this winding that fits. Choose the track width and thickness by hand.";
                     this.loading = false;
                     setTimeout(() => {this.errorMessage = ""}, 10000);
                     console.error(error);

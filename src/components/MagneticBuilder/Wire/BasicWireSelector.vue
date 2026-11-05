@@ -496,7 +496,7 @@ export default {
 
                 })
                 .catch(error => {
-                    this.errorMessage = "Our advisers could not find a wire. Sorry, you are on your own!";
+                    this.errorMessage = "The wire adviser found no wire for this winding that fits. Choose a wire by hand.";
                     setTimeout(() => {this.errorMessage = ""}, 10000);
                     this.loading = false;
                     console.error(error);
@@ -512,7 +512,7 @@ export default {
                 this.taskQueueStore.adviseWire(this.masStore.mas, this.windingIndex)
                 .then((result) => {
                     if (!result) {
-                        this.errorMessage = "Our advisers could not find a wire. Sorry, you are on your own!";
+                        this.errorMessage = "The wire adviser found no wire for this winding that fits. Choose a wire by hand.";
                         this.loading = false;
                         setTimeout(() => {this.errorMessage = ""}, 10000);
                         return;
@@ -548,7 +548,7 @@ export default {
 
                 })
                 .catch(error => {
-                    this.errorMessage = "Our advisers could not find a wire. Sorry, you are on your own!";
+                    this.errorMessage = "The wire adviser found no wire for this winding that fits. Choose a wire by hand.";
                     this.loading = false;
                     setTimeout(() => {this.errorMessage = ""}, 10000);
                 })

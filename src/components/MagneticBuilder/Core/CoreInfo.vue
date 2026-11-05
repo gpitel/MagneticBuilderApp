@@ -5,6 +5,7 @@ import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 import { useModelSettingsStore } from '../../../stores/modelSettings'
+import { useRefusedCoreMaterialStore } from '../../../stores/refusedCoreMaterial'
 </script>
 
 <script>
@@ -64,6 +65,11 @@ export default {
         }
     },
     computed: {
+        // MKF refused the design's copy of its core material when it was loaded: nothing is
+        // computed with it until it is updated (Alf, 2026-10-27).
+        refusedCoreMaterial() {
+            return useRefusedCoreMaterialStore().of(this.masStore.$id, this.masStore.mas.magnetic.core?.functionalDescription?.material);
+        },
         closeOrOverSaturation() {
             return (this.coreLossesData.magneticFluxDensityPeak / this.coreTemperatureDependantParametersData.magneticFluxDensitySaturation) > 0.85;
         },
@@ -218,6 +224,14 @@ export default {
             }
         },
         calculateCoreLosses() {
+            if (this.refusedCoreMaterial != null) {
+                // MKF refuses this copy of the core material; computing with it only repeats that
+                // refusal. The panel says it must be updated; a new material is processed and
+                // computed again.
+                this.simulationError = '';
+                this.dataUptoDate = false;
+                return;
+            }
             // Check if there are pending simulation models from the state store
             const pendingModels = this.$stateStore.pendingSimulationModels;
             
@@ -286,6 +300,12 @@ export default {
             <div v-if="!dataUptoDate && hasCalculableData" class="coreinfo-outdated-badge">Outdated</div>
         </div>
         <div class="coreinfo-body">
+            <h6
+                v-if="refusedCoreMaterial != null"
+                :data-cy="dataTestLabel + '-CoreInfo-RefusedCoreMaterial'"
+                v-tooltip="refusedCoreMaterial.message"
+                class="text-danger my-2"
+            >The core material {{ refusedCoreMaterial.name }} must be updated: the engine refuses this design's copy of its data, so nothing is computed with it. Update it to the library's copy, or choose another material.</h6>
             <h6
                 v-if="inlineNotices() && simulationError"
                 :data-cy="dataTestLabel + '-CoreInfo-SimulationError'"

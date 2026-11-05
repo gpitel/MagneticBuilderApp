@@ -5,6 +5,8 @@ import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 import CoreShapeTableModal from './CoreShapeTableModal.vue'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
+import { describeFailure } from '/WebSharedComponents/assets/js/noticeText.js'
+import { reportNotice } from '/WebSharedComponents/assets/js/notices.js'
 </script>
 
 <script>
@@ -105,6 +107,9 @@ export default {
             historyStore,
             localData,
             coreShapeTableVisible: false,
+            // What the engine said when it could not build the shapes table (shown in the table's
+            // window instead of the table: a partial table would read as the whole database).
+            coreShapeTableError: null,
             coreShapeNames,
             coreShapeFamilies,
             loading,
@@ -189,33 +194,12 @@ export default {
                             this.coreShapeFamilies[shapeFamily] = shapeFamilyLabel(shapeFamily);
                         }
                         // Use bulk function to get all core data at once
-                        this.taskQueueStore.processAllCoresFromShapes();
+                        this.loadAllShapeRows();
                     }
                     else {
                         console.error(args[1]);
                     }
                     this.loading = false;
-                }
-                if (name == "allCoresFromShapesProcessed") {
-                    if (args[0]) {
-                        const cores = args[1];
-                        // The engine enumerates its alias index, so a shape
-                        // with N aliases arrives N+1 times (ABT #924 for the
-                        // dropdown; MKF get_shapes() has the same root). One
-                        // row per shape name.
-                        const seen = new Set();
-                        const rows = [];
-                        for (const core of cores) {
-                            const row = buildShapeRow(core);
-                            if (seen.has(row.name)) continue;
-                            seen.add(row.name);
-                            rows.push(row);
-                        }
-                        this.coreShapeData = rows;
-                    }
-                    else {
-                        console.error(args[1]);
-                    }
                 }
                 if (name == "coreFromShapeProcessed") {
                     if (args[0]) {
@@ -264,6 +248,46 @@ export default {
             }
             this.forceUpdate += 1;
         },
+        // Every shape of the engine database as table rows. When the engine cannot build them, or
+        // a shape it returns lacks a number the table shows, that message is what the table window
+        // shows: there is no table to pick from. An engine failure already reaches the Engine log
+        // and the banner through the builder's (success, message) convention (MagneticBuilder.vue);
+        // an empty answer, or a shape without its numbers, is reported here.
+        async loadAllShapeRows() {
+            this.coreShapeTableError = null;
+            let cores;
+            try {
+                cores = await this.taskQueueStore.processAllCoresFromShapes();
+            }
+            catch (error) {
+                this.coreShapeData = [];
+                this.coreShapeTableError = describeFailure(error).message;
+                return;
+            }
+            try {
+                // The database is never empty: an empty answer is a broken engine, not a table.
+                if (!Array.isArray(cores) || cores.length === 0) {
+                    throw new Error('The engine returned no core shapes for the shapes table');
+                }
+                // The engine enumerates its alias index, so a shape with N aliases arrives N+1
+                // times (ABT #924 for the dropdown; MKF get_shapes() has the same root). One row
+                // per shape name.
+                const seen = new Set();
+                const rows = [];
+                for (const core of cores) {
+                    const row = buildShapeRow(core);
+                    if (seen.has(row.name)) continue;
+                    seen.add(row.name);
+                    rows.push(row);
+                }
+                this.coreShapeData = rows;
+            }
+            catch (error) {
+                this.coreShapeData = [];
+                this.coreShapeTableError = describeFailure(error).message;
+                reportNotice('ERROR', 'Core', String(error?.message ?? error));
+            }
+        },
         addToTableData(shapeName, shapeFamily) {
             this.taskQueueStore.processCoreFromShape(shapeName)
         },
@@ -302,6 +326,7 @@ export default {
         v-model:visible="coreShapeTableVisible"
         :dataTestLabel="dataTestLabel"
         :coreShapeData="coreShapeData"
+        :loadError="coreShapeTableError"
         :shapeFamily="localData.shapeFamily"
         @coreShapeSelected="coreShapeSelected"
     />

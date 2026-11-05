@@ -6,6 +6,7 @@ import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 import { useModelSettingsStore } from '../../../stores/modelSettings'
 import { useSimulationFindingsStore } from '../../../stores/simulationFindings'
+import { useRefusedCoreMaterialStore } from '../../../stores/refusedCoreMaterial'
 import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
 </script>
 
@@ -78,6 +79,11 @@ export default {
         }
     },
     computed: {
+        // MKF refused the design's copy of its core material when it was loaded: nothing is
+        // computed with it until it is updated (Alf, 2026-10-27).
+        refusedCoreMaterial() {
+            return useRefusedCoreMaterialStore().of(this.masStore.$id, this.masStore.mas.magnetic.core?.functionalDescription?.material);
+        },
         hasCalculableData() {
             return this.masStore.mas.magnetic.coil?.turnsDescription != null;
         },
@@ -314,6 +320,16 @@ export default {
                 return;
             }
             
+            if (this.refusedCoreMaterial != null) {
+                // MKF refuses this copy of the core material; computing with it only repeats that
+                // refusal. The panel says it must be updated; a new material simulates again.
+                useSimulationFindingsStore().clear(this.masStore.$id);
+                this.simulationError = '';
+                this.loading = false;
+                this.dataUptoDate = false;
+                return;
+            }
+
             if (this.masStore.mas.magnetic.coil['turnsDescription'] != null) {
 
                 // Check if there are pending simulation models from the state store
@@ -389,7 +405,7 @@ export default {
                         })
                         .catch((error) => {
                             findingsStore.clear(this.masStore.$id);
-                            this.simulationError = `MKF could not analyse the simulated results: ${error?.message || String(error)}`;
+                            this.simulationError = `The engine could not check the simulated results for problems: ${error?.message || String(error)}`;
                         });
                     })
                     .catch(error => {
@@ -446,6 +462,12 @@ export default {
         </div>
 
         <div class="coilinfo-body">
+            <h6
+                v-if="refusedCoreMaterial != null"
+                :data-cy="dataTestLabel + '-CoilInfo-RefusedCoreMaterial'"
+                v-tooltip="refusedCoreMaterial.message"
+                class="text-danger my-2"
+            >The core material {{ refusedCoreMaterial.name }} must be updated: the engine refuses this design's copy of its data, so nothing is computed with it. Update it to the library's copy, or choose another material.</h6>
             <h6
                 v-if="inlineNotices() && simulationError"
                 :data-cy="dataTestLabel + '-CoilInfo-SimulationError'"

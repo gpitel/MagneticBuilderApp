@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { waitForMkf, isWorkerMode, applyRealWindingGeometrySetting, updateEngineSettings, queueEngineSettingsTask } from '/WebSharedComponents/assets/js/mkfRuntime'
-import { checkAndFixMas, clean, toTitleCase, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
+import { checkAndFixMas, clean, withoutNulls, toTitleCase, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
 import { wireMaterialDefault } from '/WebSharedComponents/assets/js/defaults.js'
 import { Convert as MasConvert } from '/WebSharedComponents/assets/ts/MAS.ts'
 import { useSettingsStore } from './settings'
@@ -126,15 +126,39 @@ function checkMasDocument(where, kind, cleaned) {
     fn(JSON.stringify(cleaned));
 }
 
+// What each sentry-guarded call is, as the user knows it.
+const SENTRY_CALLS = {
+    masAutocomplete: 'the design could not be completed',
+    simulate: 'the simulation was not run',
+    adviseCore: 'the core adviser was not run',
+    adviseAllWires: 'the wire adviser was not run',
+    adviseWire: 'the wire adviser was not run',
+    calculateFillingFactors: 'the filling factors were not calculated',
+    getInsulationThickness: 'the insulation thickness was not read',
+};
+
 function masSentry(where, obj, kind = 'Mas') {
     try {
         const cleaned = stripNulls(JSON.parse(JSON.stringify(obj)));
         checkMasDocument(where, kind, cleaned);
     } catch (e) {
-        const msg = `[MAS sentry @ ${where}/${kind}] Frontend produced invalid payload: ${e.message}`;
         // eslint-disable-next-line no-console
-        console.error(msg);
-        throw new Error(msg);
+        console.error(`[MAS sentry @ ${where}/${kind}] Frontend produced invalid payload: ${e.message}`);
+        const call = SENTRY_CALLS[where];
+        if (call == null) {
+            throw new Error(`[MAS sentry] no description of the call '${where}' for the user: add it to SENTRY_CALLS. ${e.message}`);
+        }
+        // The validator words the violations (WebSharedComponents masValidator.js); a host without
+        // it reports quicktype's text, which is the detail either way.
+        // At most 8 of them, as the load dialog does; the full report is the detail.
+        const sentences = Array.isArray(e.masSchemaSentences) ? e.masSchemaSentences : [];
+        const inWords = sentences.length === 0 ? ''
+            : ` ${sentences.slice(0, 8).join(' ')}${sentences.length > 8 ? ` (and ${sentences.length - 8} more)` : ''}`;
+        const separator = e.message.indexOf(' Details: ');
+        const technical = separator >= 0 ? e.message.slice(separator + ' Details: '.length) : e.message;
+        throw new Error(`The design in the builder does not follow the MAS format, so ${call}.${inWords} `
+            + 'Correct these values, or report this design if you did not set them.'
+            + ` Details: [MAS sentry @ ${where}/${kind}] ${technical}`);
     }
 }
 
@@ -955,6 +979,10 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 settings.preferredCoreMaterialFerriteManufacturer = preferredManufacturer ?? this._engineDefaultPreferredManufacturers.ferrite;
                 settings.preferredCoreMaterialPowderManufacturer = preferredManufacturer ?? this._engineDefaultPreferredManufacturers.powder;
 
+                // The stock toggle of the core selector decides which catalogue is searched.
+                if (typeof adviserSettings.useOnlyCoresInStock !== 'boolean') {
+                    throw new Error(`The core adviser needs useOnlyCoresInStock as a boolean, got ${JSON.stringify(adviserSettings.useOnlyCoresInStock)}`);
+                }
                 // CMC topology → force toroidal, no distributed gaps (winding goes around).
                 const isCmc = inputs?.designRequirements?.topology?.toLowerCase() === 'commonmodechoke';
 
@@ -964,14 +992,14 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                     settings["coreIncludeStacks"] = true;
                     settings["useToroidalCores"] = true;
                     settings["useConcentricCores"] = false;
-                    settings["useOnlyCoresInStock"] = false;
+                    settings["useOnlyCoresInStock"] = adviserSettings.useOnlyCoresInStock;
                 }
                 else {
                     settings["coreIncludeDistributedGaps"] = adviserSettings.allowDistributedGaps;
                     settings["coreIncludeMargin"] = true;
                     settings["coreIncludeStacks"] = adviserSettings.allowStacks;
                     settings["useToroidalCores"] = adviserSettings.allowToroidalCores;
-                    settings["useOnlyCoresInStock"] = false;
+                    settings["useOnlyCoresInStock"] = adviserSettings.useOnlyCoresInStock;
                 }
                 const enableTemperatureFilter = adviserSettings.enableTemperatureFilter === true;
                 settings["coreAdviserEnableTemperatureFilter"] = enableTemperatureFilter;
@@ -1177,7 +1205,8 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             await mkf.ready;
 
             const result = await mkf.sweep_volumetric_losses_over_frequency(
-                typeof material === 'string' ? material : JSON.stringify(clean(material)),
+                // The material as it is (withoutNulls, not clean: a material can require an empty object).
+                typeof material === 'string' ? material : JSON.stringify(withoutNulls(material)),
                 temperature, magneticFluxDensityPeak, start, stop, numberElements, method);
             if (typeof result === 'string' && result.startsWith('Exception')) {
                 setTimeout(() => { this.volumetricLossesSwept(false, result); }, this.task_standard_response_delay);
@@ -2068,6 +2097,41 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 const fillingFactors = JSON.parse(result);
                 setTimeout(() => {this.fillingFactorsCalculated(true, fillingFactors);}, this.task_standard_response_delay);
                 return fillingFactors;
+            }
+        },
+
+        insulationThicknessRead(success = true, dataOrMessage = '') {
+        },
+
+        // The thickness of an insulation section (isLayer false) or of an insulation layer
+        // (isLayer true) of the coil, in metres, as MKF measures it on that coil's geometry
+        // (a toroid's insulation section is a wedge: its thickness is not one of its dimensions).
+        async getInsulationThickness(coil, name, isLayer) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            masSentry('getInsulationThickness', coil, 'Coil');
+            let result;
+            try {
+                result = isLayer
+                    ? await mkf.get_insulation_layer_thickness(JSON.stringify(coil), name)
+                    : await mkf.get_insulation_section_thickness(JSON.stringify(coil), name);
+            }
+            catch (error) {
+                // A worker failure (an engine without these functions answers "Method not found").
+                const message = `Exception: the thickness of the insulation ${isLayer ? 'layer' : 'section'} '${name}' could not be read: ${error?.message ?? error}`;
+                setTimeout(() => {this.insulationThicknessRead(false, message);}, this.task_standard_response_delay);
+                throw new Error(message);
+            }
+
+            if (result.startsWith("Exception")) {
+                setTimeout(() => {this.insulationThicknessRead(false, result);}, this.task_standard_response_delay);
+                throw new Error(result);
+            }
+            else {
+                const thickness = JSON.parse(result);
+                setTimeout(() => {this.insulationThicknessRead(true, thickness);}, this.task_standard_response_delay);
+                return thickness;
             }
         },
 

@@ -42,7 +42,47 @@ const LOCALLY_REPORTED_ACTIONS = new Set([
     'magnetizingInductanceOverTemperatureSwept',
     'magnetizingInductanceOverDcBiasSwept',
     'complexPermeabilityGotten',
+    // Coil info and Core info report their own calculations (simulate, the results check, the
+    // core losses) under their names; reported here as well, one failure was two records.
+    'simulated',
+    'resultsAnalyzed',
+    'coreLossesCalculated',
 ]);
+
+// The part of the builder each other calculation belongs to, as the Engine log names it.
+const BUILDER_ACTION_SOURCES = {
+    wound: 'Winding',
+    planarWound: 'Winding',
+    layersAndTurnsRewound: 'Winding',
+    fillingFactorsCalculated: 'Winding',
+    insulationThicknessRead: 'Winding',
+    coreProcessed: 'Core',
+    coreShapeProcessed: 'Core',
+    coreMaterialProcessed: 'Core',
+    coreFromShapeProcessed: 'Core',
+    allCoresFromShapesProcessed: 'Core',
+    gapReluctanceCalculated: 'Core',
+    coreTemperatureDependantParametersGotten: 'Core',
+    coreAdvised: 'Core adviser',
+    allWiresAdvised: 'Wire adviser',
+    wireProcessed: 'Wire',
+    wireDataCalculated: 'Wire',
+    equivalentWireCalculated: 'Wire',
+    wireDataByStandardNameGotten: 'Wire',
+    planarWireByStandardNameGotten: 'Wire',
+    bobbinFromCoreShapeGenerated: 'Bobbin',
+    bobbinDifferentThicknessesGenerated: 'Bobbin',
+    masAutocompleted: 'Design completion',
+    masCheckedAndFixed: 'Design completion',
+    inductanceMatrixCalculated: 'Inductance matrix',
+    leakageInductanceMatrixCalculated: 'Leakage inductance',
+    couplingCoefficientMatrixCalculated: 'Coupling coefficients',
+    resistanceMatrixCalculated: 'Resistance matrix',
+    capacitanceMatrixCalculated: 'Stray capacitance',
+    maxwellCapacitanceMatrixCalculated: 'Stray capacitance',
+    strayCapacitanceCalculated: 'Stray capacitance',
+    settingsGotten: 'Engine settings',
+};
 
 export default {
     emits: ["canContinue"],
@@ -239,6 +279,9 @@ export default {
         }
 
         this.magneticBuilt = this.isMagneticBuilt();
+        // Report the state on arrival too: until the first history entry the step would otherwise
+        // block with its default (false) and no reason.
+        this.$emit("canContinue", this.magneticBuilt, this.magneticBuilt ? [] : this.getIncompleteInputReasons());
         // Block history during initial mount — intermediate states (processCore,
         // bobbin regen, winding) won't create entries. The settle recorder below
         // (or the first wind() completion) lifts the block and saves the
@@ -265,7 +308,12 @@ export default {
                 }
                 if (args.length >= 2 && args[0] === false && typeof args[1] === 'string' && args[1].length > 0) {
                     if (this.calculationWarnings[name] !== args[1]) {
-                        reportNotice('ERROR', 'Builder', args[1]);
+                        const source = BUILDER_ACTION_SOURCES[name];
+                        if (source == null) {
+                            // A calculation added without a name here: still reported, and said loudly.
+                            console.error(`MagneticBuilder: no Engine log source for the action '${name}'; add it to BUILDER_ACTION_SOURCES`);
+                        }
+                        reportNotice('ERROR', source ?? 'Builder', args[1]);
                     }
                     this.calculationWarnings = { ...this.calculationWarnings, [name]: args[1] };
                 }

@@ -189,7 +189,7 @@ export default {
             this.processCore();
         },
         errorInDimensions() {
-            this.errorMessage = "There is an error in the dimensions, please review them";
+            this.errorMessage = "The core cannot be drawn with these gaps: one of them is not valid (zero, negative, or longer than its column). Review the gaps.";
         },
         clearError() {
             this.errorMessage = "";

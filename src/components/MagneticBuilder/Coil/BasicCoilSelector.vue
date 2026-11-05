@@ -22,6 +22,28 @@ import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js
 
 <script>
 
+// A section margin with new widths, in the form the section already has. The MAS schema takes
+// the array [topOrLeft, bottomOrRight], or a marginInfo object that also states numberLayers and
+// layerThickness. No layer data is invented: an object that has other margin data (an insulation
+// material) but no layers cannot be completed and throws. An object holding only the two widths
+// (what earlier builder versions wrote) carries exactly what the array form does, so it becomes one.
+function marginWithWidths(margin, topOrLeft, bottomOrRight, sectionName) {
+    if (margin == null || Array.isArray(margin)) {
+        return [topOrLeft, bottomOrRight];
+    }
+    if (margin.numberLayers != null && margin.layerThickness != null) {
+        return { ...margin, topOrLeftWidth: topOrLeft, bottomOrRightWidth: bottomOrRight };
+    }
+    const otherKeys = Object.keys(margin).filter((key) => key != 'topOrLeftWidth' && key != 'bottomOrRightWidth');
+    if (otherKeys.length == 0) {
+        return [topOrLeft, bottomOrRight];
+    }
+    const missing = [];
+    if (margin.numberLayers == null) missing.push('the number of layers');
+    if (margin.layerThickness == null) missing.push('the layer thickness');
+    throw new Error(`Coil section '${sectionName}': its margin has no ${missing.join(' and no ')}, which the MAS format requires of a margin described as an object.`);
+}
+
 export default {
     emits: ['fits', 'plotModeChange', 'swapIncludeFringing', 'errorInImage', 'fillingFactorsChanged'],
     props: {
@@ -323,7 +345,9 @@ export default {
         // mounted(), the inputs first showed the defaults and then saw the real values
         // arrive as a change: each reported it as an update (asking for a wind), and the
         // proportions input rewrote the values it had just been given.
-        this.assignLocalData(this.masStore.mas.magnetic);
+        // mounted() keeps a stored layout only once the insulation thicknesses MKF reads are
+        // in, or the kept signature would hold the defaults and the first wind re-wind it.
+        this._localDataRead = this.assignLocalData(this.masStore.mas.magnetic);
 
         this.getProportionsAndPattern(this.masStore.mas.magnetic.coil);
     },
@@ -334,14 +358,16 @@ export default {
         if (this.$stateStore.loadingDesign) {
             this.releaseLoadingDesignSoon();
             if (this.coilIsWound()) {
-                this.keepStoredCoilLayout();
+                this._localDataRead.then(() => this.keepStoredCoilLayout(), this.localDataReadFailed);
             }
             else {
+                this._localDataRead.catch(this.localDataReadFailed);
                 this.storedCoilLayoutStore.drop(this.masStore.$id);
                 this.tryToWind();
             }
         }
         else {
+            this._localDataRead.catch(this.localDataReadFailed);
             this.tryToWind();
         }
 
@@ -354,12 +380,13 @@ export default {
                     // the wire and core panels ignore changes while it is on.
                     this.releaseLoadingDesignSoon();
                     this.resetProportionPerWinding(this.localData);
-                    this.assignLocalData(this.masStore.mas.magnetic);
+                    const localDataRead = this.assignLocalData(this.masStore.mas.magnetic);
                     if (this.coilIsWound()) {
                         this.getProportionsAndPattern(this.masStore.mas.magnetic.coil);
-                        this.keepStoredCoilLayout();
+                        localDataRead.then(() => this.keepStoredCoilLayout(), this.localDataReadFailed);
                     }
                     else {
+                        localDataRead.catch(this.localDataReadFailed);
                         this.storedCoilLayoutStore.drop(this.masStore.$id);
                         this.tryToWind();
                     }
@@ -387,7 +414,7 @@ export default {
                         }];
                     }
                     this.resetProportionPerWinding(this.localData);
-                    this.assignLocalData(this.masStore.mas.magnetic);
+                    this.assignLocalData(this.masStore.mas.magnetic).catch(this.localDataReadFailed);
                 }
             });
         }));
@@ -396,7 +423,7 @@ export default {
             after(() => {
                 if (name == "historyPointerUpdated") {
                     this.tryToWind();
-                    this.assignLocalData(this.masStore.mas.magnetic);
+                    this.assignLocalData(this.masStore.mas.magnetic).catch(this.localDataReadFailed);
                     this.getProportionsAndPattern(this.masStore.mas.magnetic.coil);
 
                     this.masStore.mas.magnetic.coil.functionalDescription.forEach((datum, sectionIndex) => {
@@ -427,7 +454,7 @@ export default {
                 if (name == "bobbinFromCoreShapeGenerated" || name == "bobbinDifferentThicknessesGenerated") {
                     if (args[0]) {
                         this.taskQueueStore.bobbinRegenerationPending = false;
-                        this.assignLocalData(this.masStore.mas.magnetic);
+                        this.assignLocalData(this.masStore.mas.magnetic).catch(this.localDataReadFailed);
                         this.assignCoilData();
                         this.recentChange = true;
                         this.tryToWind();
@@ -438,7 +465,7 @@ export default {
                 }
                 if (name == "coreProcessed") {
                     if (args[0]) {
-                        this.assignLocalData(this.masStore.mas.magnetic);
+                        this.assignLocalData(this.masStore.mas.magnetic).catch(this.localDataReadFailed);
                         this.assignCoilData();
                         // Only trigger winding if no bobbin regeneration is pending.
                         // When shape/material/stacks change, bobbin will be regenerated
@@ -1348,7 +1375,7 @@ export default {
                     this.tryingToSend = false;
                     this.recentChange = true;
                     this.blockingRebounds = true;
-                    this.assignLocalData(this.masStore.mas.magnetic);
+                    this.assignLocalData(this.masStore.mas.magnetic).catch(this.localDataReadFailed);
                     this.tryToWind();
                     if (this._reboundsTimer) clearTimeout(this._reboundsTimer);
                     this._reboundsTimer = setTimeout(() => {
@@ -1459,7 +1486,17 @@ export default {
                 , this.$settingsStore.waitingTimeAfterChange);
             }
         },
+        // The task queue has already put the engine's reason in the Engine log (Winding); the
+        // knob keeps its previous value, so say which read it was.
+        localDataReadFailed(error) {
+            console.error('[BasicCoilSelector] the insulation thicknesses of the coil could not be read from MKF:', error);
+        },
+        // Reads the panel's knobs back from the coil. The insulation thicknesses come from MKF,
+        // which measures them on the coil's geometry; the returned promise settles once they
+        // are in (a failure is also reported to the Engine log by the task queue).
         assignLocalData(magnetic) {
+            // In coil order, so the last insulation read back wins as before.
+            const thicknessReads = [];
             if (!this.blockingRebounds) {
                 try {
                     if (magnetic.coil.bobbin != "" && magnetic.coil.bobbin != "Dummy") {
@@ -1512,14 +1549,8 @@ export default {
                                             this.localData.dataPerSection[conductionSectionIndex].turnsAlignment = layer.turnsAlignment;
                                         }
                                         else {
-
-                                            if (section.layersOrientation == "overlapping") {
-                                                this.localData.interlayerThickness = layer.dimensions[0];
-                                            }
-                                            else {
-                                                this.localData.interlayerThickness = layer.dimensions[1];
-                                            }
-
+                                            thicknessReads.push(this.taskQueueStore.getInsulationThickness(magnetic.coil, layer.name, true)
+                                                .then((thickness) => ({ field: 'interlayerThickness', thickness })));
                                         }
                                     }
                                 })
@@ -1538,18 +1569,8 @@ export default {
                                 conductionSectionIndex += 1;
                             }
                             else {
-                                if (this.localData.sectionsOrientation == "overlapping") {
-                                    this.localData.intersectionThickness = section.dimensions[0];
-                                }
-                                else {
-                                    if (this.masStore.mas.magnetic.core.functionalDescription.shape.family == 't') {
-                                        const thickness = section.dimensions[0] * Math.sin(section.dimensions[1]);
-                                        this.localData.intersectionThickness = thickness;
-                                    }
-                                    else {
-                                        this.localData.intersectionThickness = section.dimensions[1];
-                                    }
-                                }
+                                thicknessReads.push(this.taskQueueStore.getInsulationThickness(magnetic.coil, section.name, false)
+                                    .then((thickness) => ({ field: 'intersectionThickness', thickness })));
                             }
                         })
                     }
@@ -1571,6 +1592,16 @@ export default {
                 catch (e) {
                 }
             }
+            return Promise.all(thicknessReads).then((reads) => {
+                if (reads.length === 0) {
+                    return;
+                }
+                reads.forEach(({ field, thickness }) => {
+                    this.localData[field] = thickness;
+                });
+                this.forceUpdate += 1;
+                this.$stateStore.storeWoundConfiguration(this.localData);
+            });
         },
         assignCoilData() {
             // Per-column array form: the alignment/orientation knobs belong to the
@@ -1589,16 +1620,21 @@ export default {
             coilDataBobbin.processedDescription.windingWindows[0].sectionsAlignment = this.localData.sectionsAlignment;
             coilDataBobbin.processedDescription.windingWindows[0].sectionsOrientation = this.localData.sectionsOrientation;
 
-            // Update margins in the coil's sectionsDescription
+            // Update margins in the coil's sectionsDescription, in a form the MAS schema accepts:
+            // the array [topOrLeft, bottomOrRight], or a marginInfo object, which also needs
+            // numberLayers and layerThickness. A margin is written in the form it already has, and
+            // a section without one gets the array form, which carries exactly the two widths.
             if (this.masStore.mas.magnetic.coil.sectionsDescription != null) {
                 let conductionSectionIndex = 0;
                 this.masStore.mas.magnetic.coil.sectionsDescription.forEach((section) => {
                     if (section.type == "conduction" && conductionSectionIndex < this.localData.dataPerSection.length) {
-                        if (section.margin == null) {
-                            section.margin = {};
+                        const datum = this.localData.dataPerSection[conductionSectionIndex];
+                        const topOrLeft = datum.topOrLeftMargin;
+                        const bottomOrRight = datum.bottomOrRightMargin;
+                        if (!Number.isFinite(topOrLeft) || !Number.isFinite(bottomOrRight)) {
+                            throw new Error(`Coil section '${section.name}': the margin widths are not numbers (top or left: ${topOrLeft}, bottom or right: ${bottomOrRight}).`);
                         }
-                        section.margin.topOrLeftWidth = this.localData.dataPerSection[conductionSectionIndex].topOrLeftMargin;
-                        section.margin.bottomOrRightWidth = this.localData.dataPerSection[conductionSectionIndex].bottomOrRightMargin;
+                        section.margin = marginWithWidths(section.margin, topOrLeft, bottomOrRight, section.name);
                         conductionSectionIndex++;
                     }
                 });
