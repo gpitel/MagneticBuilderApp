@@ -5,6 +5,7 @@ import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import ElementFromList from '/WebSharedComponents/DataInput/ElementFromList.vue'
 import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
 import Text from '/WebSharedComponents/DataInput/Text.vue'
+import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 import { useTaskQueueStore } from '../../../../../stores/taskQueue'
 
 </script>
@@ -49,6 +50,20 @@ export default {
                 yAxisMin: 0.001,
                 xAxisMax: 300,
                 yAxisMax: 2,
+                // A saturation point is a MAS bhCyclePoint: flux density AND magnetic field AND
+                // temperature are all required. The chart plots flux density against temperature;
+                // the field is edited on each point's row.
+                extraFields: [{
+                    name: 'magneticField',
+                    replaceLabel: 'Magnetic field',
+                    unit: 'A/m',
+                    min: 1e-3,
+                    max: 1e7,
+                    numberDecimals: 1,
+                    allowNegative: false,
+                    allowZero: false,
+                    tooltip: tooltipsMagneticBuilder.materialSaturationMagneticField,
+                }],
         }
 
         const localData = [];
@@ -85,12 +100,20 @@ export default {
 
             if (typeof(this.data) == "object") {
                 this.taskQueueStore.getDefaults().then((defaults) => {
-                    this.data.forEach((elem) => {
+                    // Rebuilt from scratch on every call: appending to the previous list showed every
+                    // point again after each add or remove. The rows are the data's own points, in
+                    // order, so row i edits data[i].
+                    const localData = [];
+                    const indexes = [];
+                    this.data.forEach((elem, index) => {
                         if (elem.temperature == null) {
                             elem.temperature = defaults.get('ambientTemperature');
                         }
-                        this.localData.push(elem);
+                        localData.push(elem);
+                        indexes.push(index);
                     })
+                    this.localData = localData;
+                    this.indexes = indexes;
                 })
             }
         },

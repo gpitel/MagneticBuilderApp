@@ -11,6 +11,7 @@ import Magnetic2DVisualizer from '/WebSharedComponents/Common/Magnetic2DVisualiz
 import WindingStudio from '../WindingStudio/WindingStudio.vue'
 import { wiresEqual } from '../WindingStudio/geometry.js'
 import { toTitleCase, checkAndFixMas, deepCopy, roundWithDecimals, cleanCoil, generateHash, effectiveBobbin } from '/WebSharedComponents/assets/js/utils.js'
+import { reportNotice } from '/WebSharedComponents/assets/js/notices.js'
 import { useHistoryStore } from '../../../stores/history'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
 import { useMagneticBuilderSettingsStore } from '../../../stores/magneticBuilderSettings'
@@ -307,7 +308,10 @@ export default {
             // old window mangles the coil (a cartesian-meters rect applied to a
             // toroid's polar section shrank it to 0.005deg and silently dropped
             // 38 of 42 turns). Drop the pins and their rect-derived margins.
-            if (oldIdentity === "" || newIdentity === oldIdentity) {
+            // From no core ("") too: that is a new design's first core, and any pin still in the
+            // store was drawn on an earlier design. Kept, a pin of "Secondary 0 section 0" drawn
+            // on an E 20/10/6 put a user's PQ 26/25 secondary inside the centre column (ABT #2301).
+            if (newIdentity === oldIdentity) {
                 return;
             }
             if (this.windingStudioStore.customSectionCount === 0) {
@@ -908,6 +912,9 @@ export default {
                 console.error(`[WindingStudio] No bobbin window ${windowIndex} to set the layout on`);
                 return;
             }
+            if (targetWindow.sectionsOrientation != null && targetWindow.sectionsOrientation !== sectionsOrientation) {
+                this.dropLayoutOfReorientedWindow(windowIndex);
+            }
             targetWindow.sectionsOrientation = sectionsOrientation;
             targetWindow.sectionsAlignment = sectionsAlignment;
             if (windingOrder != null) {
@@ -929,6 +936,53 @@ export default {
             this.oldInputsCoilHash = null;
             this.recentChange = true;
             this.tryToWind();
+        },
+        dropLayoutOfReorientedWindow(windowIndex) {
+            // A section margin is [topOrLeft, bottomOrRight] and its window's sections
+            // orientation says which axis that is: top/bottom for overlapping sections,
+            // left/right for contiguous ones (MKF wind_by_rectangular_sections and the
+            // painter). Re-orienting the window does not turn a top margin into a left
+            // one, so the margins the window's sections carry stop meaning anything:
+            // kept, a 14 mm bottom gap of an overlapping layout became a 14 mm right
+            // margin of a contiguous one, tape drawn across the whole window over the
+            // turns. The drawn rectangles go with them: they were drawn for the other
+            // layout, and their wall gaps are where those margins came from.
+            // A section without windingWindow lives in the coil's first window (MAS).
+            const reorientedSections = this.conductiveSections
+                .map((section, sectionIndex) => ({ section, sectionIndex }))
+                .filter(({ section }) => (section.windingWindow == null ? 0 : section.windingWindow) === windowIndex);
+            for (const { section, sectionIndex } of reorientedSections) {
+                const datum = this.localData.dataPerSection[sectionIndex];
+                if (datum == null) {
+                    // No per-section entry: the wind sends no margin for it, so there is none to clear.
+                    continue;
+                }
+                datum.topOrLeftMargin = 0;
+                datum.bottomOrRightMargin = 0;
+            }
+            this.windingStudioStore.clearCustomSectionRectsForSections(reorientedSections.map(({ section }) => section.name));
+        },
+        /**
+         * Whether a pinned section rectangle lies inside the coil's first winding window (rectangular windows:
+         * centre coordinates and dimensions in metres, as the studio draws them). Round windows are polar and are
+         * guarded by their window shape alone.
+         */
+        pinnedRectInsideWindow(rect, bobbin) {
+            const window = effectiveBobbin(bobbin)?.processedDescription?.windingWindows?.[0];
+            if (window == null || window.shape !== 'rectangular') {
+                return true;
+            }
+            if (window.coordinates == null || window.width == null || window.height == null
+                || rect.coordinates == null || rect.dimensions == null) {
+                throw new Error('A pinned section rectangle or the winding window it is checked against has no coordinates or dimensions');
+            }
+            const tolerance = 1e-6;
+            const [x, y] = rect.coordinates;
+            const [width, height] = rect.dimensions;
+            return x - width / 2 >= window.coordinates[0] - window.width / 2 - tolerance
+                && x + width / 2 <= window.coordinates[0] + window.width / 2 + tolerance
+                && y - height / 2 >= window.coordinates[1] - window.height / 2 - tolerance
+                && y + height / 2 <= window.coordinates[1] + window.height / 2 + tolerance;
         },
         async resizeSectionRectFromStudio({ sectionName, coordinates, dimensions, margin = null }) {
             // Winding-studio free transform: write the custom rectangle into the
@@ -1284,10 +1338,24 @@ export default {
             let customSectionRects = null;
             if (this.windingStudioStore.customSectionCount > 0) {
                 const matchingRects = {};
+                const outsideWindow = [];
                 for (const [sectionName, rect] of Object.entries(this.windingStudioStore.customSectionRects)) {
                     if (rect.windowShape == null || rect.windowShape === currentWindowShape) {
+                        if (!this.pinnedRectInsideWindow(rect, bobbin)) {
+                            outsideWindow.push(sectionName);
+                            continue;
+                        }
                         matchingRects[sectionName] = { coordinates: rect.coordinates, dimensions: rect.dimensions };
                     }
+                }
+                if (outsideWindow.length > 0) {
+                    // A pin is drawn inside the window it belongs to, so one outside this window was
+                    // drawn on another design or core (ABT #2301): it is dropped, and said so.
+                    this.windingStudioStore.clearCustomSectionRectsForSections(outsideWindow);
+                    reportNotice('WARNING', 'Winding Studio', `The drawn rectangle${outsideWindow.length === 1 ? '' : 's'} of `
+                        + `${outsideWindow.map((name) => `'${name}'`).join(', ')} lay outside this coil's winding window `
+                        + `(drawn on another design or core), so ${outsideWindow.length === 1 ? 'it was' : 'they were'} dropped `
+                        + `and the section${outsideWindow.length === 1 ? ' is' : 's are'} placed automatically.`);
                 }
                 if (Object.keys(matchingRects).length > 0) {
                     customSectionRects = matchingRects;
@@ -1642,6 +1710,16 @@ export default {
         },
         coilUpdated() {
             this.updateDataPerSection();
+            // The Alignment panel's Windings Orientation is window 0's sections orientation;
+            // it reaches the bobbin in assignCoilData, so the bobbin still holds the old one.
+            const coilBobbin = this.masStore.mas.magnetic.coil.bobbin;
+            const windowZeroBobbin = Array.isArray(coilBobbin) ? coilBobbin[0] : coilBobbin;
+            const previousOrientation = (typeof windowZeroBobbin === 'object' && windowZeroBobbin != null)
+                ? windowZeroBobbin.processedDescription?.windingWindows?.[0]?.sectionsOrientation
+                : null;
+            if (previousOrientation != null && previousOrientation !== this.localData.sectionsOrientation) {
+                this.dropLayoutOfReorientedWindow(0);
+            }
             this.assignCoilData();
             this.recentChange = true;
             this.tryToWind();
@@ -1804,8 +1882,13 @@ export default {
                 <div
                     v-if="magneticBuilderSettingsStore.enableWindingStudio && useVisualizers && masStore.mas.magnetic != null && masStore.mas.magnetic.core != null && masStore.mas.magnetic.core.functionalDescription.shape != ''"
                     class="mb-3"
-                    :style="(imageUpToDate? 'opacity: 100%;' : 'opacity: 20%;') + ' max-height: 50vh;'"
+                    :style="(imageUpToDate? 'opacity: 100%;' : 'opacity: 20%;')"
                 >
+                    <!-- No max-height here: the studio's drawing is already capped at 45vh, and
+                         its toolbar above it wraps to several lines in a narrow card. A 50vh cap
+                         on this box kept the box at 50vh while its content ran past it, over
+                         Advanced Parasitics and the inputs below (Alf, 2026-11-05: "the image
+                         overflows the space in the coil card"). -->
                     <WindingStudio
                         :dataTestLabel="dataTestLabel"
                         :masStore="masStore"

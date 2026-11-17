@@ -34,6 +34,8 @@ export default {
             <div :class="isMobile($windowWidth) ? 'col-12' : enableCoil ? 'col-4' : 'col-offset-1 col-4'">
                 <CoreBuilder
                     :masStore="masStore"
+                    :showEffectiveParameters="showEffectiveParameters"
+                    :completeCoreOnMaterialChange="completeCoreOnMaterialChange"
                     :readOnly="readOnly"
                     :useVisualizers="useVisualizers"
                     :enableSimulation="enableSimulation"

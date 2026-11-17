@@ -51,3 +51,11 @@ export function describeCurveDataLimits(curve2D) {
     return notes;
 }
 
+
+/**
+ * The Engine log level of a graph's failure (ABT #2302): a material with no complex permeability data is a
+ * limit of the data, which the chart states itself, so it is a WARNING; any other failure is an ERROR.
+ */
+export function graphFailureLevel(message) {
+    return message.startsWith('Complex permeability data is not available for ') ? 'WARNING' : 'ERROR';
+}

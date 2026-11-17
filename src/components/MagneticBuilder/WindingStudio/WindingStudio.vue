@@ -8,9 +8,10 @@
 // P0 scope: read-only parity view + hover/selection + color-by-winding.
 // Gated by magneticBuilderSettings.enableWindingStudio.
 import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue';
-import { buildStudioModel, buildConnectionViews, windingColor, annularSectorPath, woundDistanceToAngleDeg, wiresEqual } from './geometry.js';
+import { buildStudioModel, buildConnectionViews, windingColor, annularSectorPath, woundDistanceToAngleDeg, wiresEqual, needsPainterOutline, parsePainterFerriteOutline } from './geometry.js';
 import { waitForMkf, applyRealWindingGeometrySetting } from '/WebSharedComponents/assets/js/mkfRuntime';
 import { useSettingsStore } from '/src/stores/settings';
+import { reportNotice } from '/WebSharedComponents/assets/js/notices.js';
 
 const props = defineProps({
     dataTestLabel: {
@@ -103,7 +104,40 @@ function cssColor(color) {
     return color;
 }
 
-const model = computed(() => buildStudioModel(props.masStore.mas?.magnetic));
+// Drum-family cores (drum, rod, drumRing, drumSemishielded, molded) are drawn from MKF's own
+// outline: the Painter's plot_core ferrite polygons. Until it arrives, or when MKF cannot draw the
+// core, the studio says so instead of drawing a guessed core.
+const painterOutline = ref(null);
+let painterOutlineRequestId = 0;
+
+async function fetchPainterOutline() {
+    const magnetic = props.masStore.mas?.magnetic;
+    const requestId = ++painterOutlineRequestId;
+    if (magnetic?.core == null || magnetic?.coil == null || !needsPainterOutline(magnetic.core) || magnetic.core.processedDescription == null) {
+        painterOutline.value = null;
+        return;
+    }
+    painterOutline.value = { status: 'loading' };
+    try {
+        const mkf = await waitForMkf();
+        const svg = await mkf.plot_core(JSON.stringify(magnetic));
+        if (requestId !== painterOutlineRequestId) return;   // superseded
+        painterOutline.value = { status: 'ready', polygons: parsePainterFerriteOutline(svg) };
+    }
+    catch (error) {
+        if (requestId !== painterOutlineRequestId) return;
+        console.error('WindingStudio: plot_core failed', error);
+        painterOutline.value = { status: 'error', reason: error?.message ?? String(error) };
+    }
+}
+
+watch(
+    () => props.masStore.mas?.magnetic?.core,
+    () => { fetchPainterOutline(); },
+    { deep: true, immediate: true },
+);
+
+const model = computed(() => buildStudioModel(props.masStore.mas?.magnetic, painterOutline.value));
 
 // ABT #849 (Alf, 2026-08-22): CONNECTIONS — terminals and the links between layers/sections.
 // Unlike everything else in this component, they are NOT in the MAS: MKF derives them from the
@@ -196,6 +230,9 @@ const corePath = computed(() => {
     if (model.value.kind === 'toroidal') {
         return annularSectorPath(core.ring.innerRadius, core.ring.outerRadius, 0, 360);
     }
+    if (core.silhouette != null) {
+        return null;
+    }
     const rectPath = (r) => `M ${r.x} ${r.y} h ${r.width} v ${r.height} h ${-r.width} Z`;
     return [rectPath(core.outer), ...core.cavities.map(rectPath)].join(' ');
 });
@@ -248,19 +285,37 @@ function marginRects(section) {
             ? { x: section.rect.x, y: window.rect.y + window.rect.height - after * MARGIN_MM, width: section.rect.width, height: after * MARGIN_MM }
             : { x: window.rect.x + window.rect.width - after * MARGIN_MM, y: section.rect.y, width: after * MARGIN_MM, height: section.rect.height });
     }
-    // Clamp to the window so pathological margins never spill onto the core.
-    return rects
-        .map((rect) => {
-            const x0 = Math.max(rect.x, window.rect.x);
-            const y0 = Math.max(rect.y, window.rect.y);
-            const x1 = Math.min(rect.x + rect.width, window.rect.x + window.rect.width);
-            const y1 = Math.min(rect.y + rect.height, window.rect.y + window.rect.height);
-            return x1 - x0 > 1e-6 && y1 - y0 > 1e-6
-                ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 }
-                : null;
-        })
-        .filter(Boolean);
+    // Drawn as stored, as MKF's painter draws them outside the studio. A clamp to the window
+    // used to hide margins that cannot fit: the studio showed a strip of tape while the painter
+    // drew 11.89 mm of it across the core of a 3.08 mm wide window (Alf, 2026-11-06: "why is the
+    // 2D in studio different than the 2D when we go out??"). marginOverflow() flags those.
+    return rects;
 }
+
+// A margin that cannot fit beside its section in the window, along the margin axis: the
+// message saying so, else null.
+function marginOverflow(section) {
+    if (section.margin == null || section.type !== 'conduction' || model.value.kind === 'toroidal') {
+        return null;
+    }
+    const window = model.value.windows.find((w) => w.index === section.windingWindow) ?? model.value.windows[0];
+    if (window == null) {
+        return null;
+    }
+    const [before, after] = section.margin;
+    const contiguous = (window.sectionsOrientation ?? 'overlapping') === 'contiguous';
+    const span = contiguous ? window.rect.width : window.rect.height;
+    const size = contiguous ? section.rect.width : section.rect.height;
+    const total = (before + after) * MARGIN_MM + size;
+    if (total <= span * (1 + 1e-3)) {
+        return null;
+    }
+    const mm = (value) => `${value.toFixed(2)} mm`;
+    return `Section '${section.name}' has margins of ${mm(before * MARGIN_MM)} and ${mm(after * MARGIN_MM)} `
+        + `${contiguous ? 'left and right' : 'above and below'} of its ${mm(size)} ${contiguous ? 'width' : 'height'}, `
+        + `which do not fit its ${mm(span)} ${contiguous ? 'wide' : 'high'} window`;
+}
+
 
 // Litz bundle icon: a center strand plus a ring of six, scaled to the glyph.
 function litzStrands(turn) {
@@ -1148,6 +1203,21 @@ function endBoundaryDrag(event) {
 // distance from the winding-window wall to the section edge. Dragging an edge
 // emits the margin; the winder re-spreads/re-packs the turns accordingly.
 const MARGIN_MM = 1000;
+
+const marginOverflows = computed(() => (model.value?.sections ?? [])
+    .map((section) => ({ section, message: marginOverflow(section) }))
+    .filter((entry) => entry.message != null));
+
+// Each overflow goes to the Engine log once per message.
+const reportedMarginOverflows = new Set();
+watch(marginOverflows, (overflows) => {
+    for (const { message } of overflows) {
+        if (!reportedMarginOverflows.has(message)) {
+            reportedMarginOverflows.add(message);
+            reportNotice('ERROR', 'Winding Studio', message);
+        }
+    }
+}, { immediate: true });
 const sectionEdgeHandles = computed(() => {
     if (!props.editable || !model.value.valid || model.value.kind === 'toroidal' || model.value.windows.length === 0) {
         return [];
@@ -1683,16 +1753,28 @@ function endTransformDrag() {
         return;
     }
     // The gaps the custom rectangle leaves to the window walls along the
-    // sections axis BECOME the section's margins (tape): the drawn layout and
+    // margin axis BECOME the section's margins (tape): the drawn layout and
     // the MAS margin data stay consistent (painter, insulation panel, fill).
+    // The window's sectionsOrientation picks that axis exactly as the painter
+    // (paint_two_piece_set_margin) and marginRects() read it back: overlapping
+    // sections carry top/bottom margins, contiguous sections left/right ones.
+    // Both orientations derive them: a contiguous section used to send no
+    // margin at all, so it kept whatever it had before — top/bottom gaps from
+    // an overlapping layout — which then drew as left/right tape across the
+    // whole window.
     const window = model.value.windows.find((w) => w.index === drag_.section.windingWindow) ?? model.value.windows[0];
     let margin = null;
-    if (window != null && (window.sectionsOrientation ?? 'overlapping') !== 'contiguous') {
-        const topGap = Math.max(0, rect.y - window.rect.y);
-        const bottomGap = Math.max(0, window.rect.y + window.rect.height - (rect.y + rect.height));
+    if (window != null) {
+        const contiguous = (window.sectionsOrientation ?? 'overlapping') === 'contiguous';
+        const beforeGap = contiguous
+            ? Math.max(0, rect.x - window.rect.x)
+            : Math.max(0, rect.y - window.rect.y);
+        const afterGap = contiguous
+            ? Math.max(0, window.rect.x + window.rect.width - (rect.x + rect.width))
+            : Math.max(0, window.rect.y + window.rect.height - (rect.y + rect.height));
         margin = [
-            topGap < 0.05 ? 0 : topGap / MARGIN_MM,
-            bottomGap < 0.05 ? 0 : bottomGap / MARGIN_MM,
+            beforeGap < 0.05 ? 0 : beforeGap / MARGIN_MM,
+            afterGap < 0.05 ? 0 : afterGap / MARGIN_MM,
         ];
     }
     // SVG mm (y flipped) -> physical meters, center-based like MAS sections.
@@ -1714,7 +1796,7 @@ function endTransformDrag() {
         :data-cy="dataTestLabel + '-WindingStudio'"
         :style="{ 'background-color': maximized ? undefined : backgroundColor, color: textColor }"
     >
-        <div v-if="!model.valid" class="winding-studio-empty">
+        <div v-if="!model.valid" class="winding-studio-empty" :data-cy="dataTestLabel + '-WindingStudio-reason'">
             {{ model.reason }}
         </div>
         <template v-else>
@@ -1865,11 +1947,21 @@ function endTransformDrag() {
                     class="winding-studio-svg"
                 >
                     <!-- Core -->
-                    <path :d="corePath" :fill="cssColor(ferriteColor)" fill-rule="evenodd" />
+                    <path v-if="corePath != null" :d="corePath" :fill="cssColor(ferriteColor)" fill-rule="evenodd" />
+                    <!-- Drum-family cores: MKF's own outline (Painter plot_core ferrite polygons) -->
+                    <g v-else :data-cy="dataTestLabel + '-WindingStudio-painter-core'">
+                        <polygon
+                            v-for="(points, index) in model.core.silhouette"
+                            :key="'ferrite' + index"
+                            :points="points"
+                            :fill="cssColor(ferriteColor)"
+                        />
+                    </g>
                     <!-- Gaps: breaks in the columns -->
                     <rect
                         v-for="(gap, index) in model.core.gaps"
                         :key="'gap' + index"
+                        :data-cy="dataTestLabel + '-WindingStudio-gap'"
                         v-bind="gap"
                         :fill="backgroundColor === 'transparent' ? '#000000' : backgroundColor"
                     />
@@ -1919,6 +2011,16 @@ function endTransformDrag() {
                             />
                         </template>
                     </template>
+                    <!-- Margins that do not fit their window, outlined -->
+                    <rect
+                        v-for="{ section, message } in marginOverflows"
+                        :key="section.name + 'margin-overflow'"
+                        v-bind="section.rect"
+                        class="winding-studio-margin-overflow"
+                        fill="none"
+                        pointer-events="none"
+                        :data-cy="dataTestLabel + '-WindingStudio-margin-overflow-' + section.name"
+                    ><title>{{ message }}</title></rect>
                     <!-- Insulation layers -->
                     <template v-if="fieldImage == null">
                         <template v-for="layer in model.layers">
@@ -2672,6 +2774,11 @@ function endTransformDrag() {
 .winding-studio-fit-bad {
     color: #ff8b8b;
     border-color: #ff8b8b88;
+}
+.winding-studio-margin-overflow {
+    stroke: var(--p-danger);
+    stroke-width: 0.15;
+    stroke-dasharray: 0.4 0.25;
 }
 .winding-studio-slot {
     cursor: copy;

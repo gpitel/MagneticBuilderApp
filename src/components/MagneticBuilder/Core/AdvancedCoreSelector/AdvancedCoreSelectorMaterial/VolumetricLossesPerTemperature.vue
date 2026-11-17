@@ -3,6 +3,7 @@ import DimensionReadOnly from '/WebSharedComponents/DataInput/DimensionReadOnly.
 import PropertyTool from '/WebSharedComponents/Common/PropertyTool.vue'
 import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
+import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 import { useTaskQueueStore } from '../../../../../stores/taskQueue'
 
 </script>
@@ -58,8 +59,14 @@ export default {
         const volumetricLossesPoints = [];
         const configuration = [];
         const temperatures = [];
+        const fitting = false;
+        const fitReport = null;
+        const fitError = null;
 
         return {
+            fitting,
+            fitReport,
+            fitError,
             taskQueueStore,
             blockingRebounds,
             indexes,
@@ -91,6 +98,9 @@ export default {
         assignLocalData() {
             this.localData = [];
             this.indexes = [];
+            // One configuration per temperature, rebuilt with the curves: kept from the previous call,
+            // a regrouped curve read the old axis and series labels.
+            this.configuration = [];
 
             let distictTemperatures = [];
             let distictMagneticFluxDensities = [];
@@ -126,6 +136,11 @@ export default {
                     this.configurationPerTemperature.xAxisUnit = 'Hz';
                     this.configurationPerTemperature.xAxisMin = 1;
                     this.configurationPerTemperature.xAxisMax = 15000000;
+                    // A loss point is (flux density, frequency, temperature, value). The chart plots
+                    // value against frequency per flux density; the flux density and the temperature
+                    // are edited on each row, so the user can enter the points at two or more flux
+                    // densities the engine's loss-model fit needs.
+                    this.configurationPerTemperature.extraFields = [this.fluxDensityField(), this.temperatureField()];
                     this.configuration.push(deepCopy(this.configurationPerTemperature));
                     distictMagneticFluxDensities.forEach((magneticFluxDensity, magneticFluxDensityIndex) => {
                         this.localData[this.localData.length - 1].push([]);
@@ -139,6 +154,7 @@ export default {
                     this.configurationPerTemperature.xAxisUnit = 'T';
                     this.configurationPerTemperature.xAxisMin = 0.001;
                     this.configurationPerTemperature.xAxisMax = 2;
+                    this.configurationPerTemperature.extraFields = [this.frequencyField(), this.temperatureField()];
                     this.configuration.push(deepCopy(this.configurationPerTemperature));
                     distictFrequencies.forEach((frequency, frequencyIndex) => {
                         this.localData[this.localData.length - 1].push([]);
@@ -156,7 +172,9 @@ export default {
                                     this.indexes[temperatureIndex][magneticFluxDensityIndex].push(index);
                                     this.localData[temperatureIndex][magneticFluxDensityIndex].push({
                                         frequency: datum.magneticFluxDensity.frequency,
-                                        value: datum.value
+                                        value: datum.value,
+                                        magneticFluxDensity: datum.magneticFluxDensity.magneticFluxDensity.processed.peak,
+                                        temperature: datum.temperature,
                                     })
                                 }
                             })
@@ -167,7 +185,9 @@ export default {
                                     this.indexes[temperatureIndex][frequencyIndex].push(index);
                                     this.localData[temperatureIndex][frequencyIndex].push({
                                         magneticFluxDensity: datum.magneticFluxDensity.magneticFluxDensity.processed.peak,
-                                        value: datum.value
+                                        value: datum.value,
+                                        frequency: datum.magneticFluxDensity.frequency,
+                                        temperature: datum.temperature,
                                     })
                                 }
                             })
@@ -190,6 +210,53 @@ export default {
                 }
             })
             this.temperatures = distictTemperatures;
+        },
+        fluxDensityField() {
+            return { name: 'magneticFluxDensity', replaceLabel: 'Peak flux density', unit: 'T', min: 1e-4, max: 2,
+                numberDecimals: 4, allowNegative: false, allowZero: false,
+                tooltip: tooltipsMagneticBuilder.materialLossesMagneticFluxDensity };
+        },
+        frequencyField() {
+            return { name: 'frequency', replaceLabel: 'Frequency', unit: 'Hz', min: 1, max: 15000000,
+                numberDecimals: 0, allowNegative: false, allowZero: false,
+                tooltip: tooltipsMagneticBuilder.materialLossesFrequency };
+        },
+        temperatureField() {
+            return { name: 'temperature', replaceLabel: 'Temperature', unit: '°C', min: -100, max: 300,
+                numberDecimals: 1, allowNegative: true, allowZero: true,
+                tooltip: tooltipsMagneticBuilder.materialLossesTemperature };
+        },
+        // Measured points give the engine no core-loss model (MKF's CoreLossesModel::get_methods reads only
+        // models). MKF fits a Steinmetz model to them over the frequencies they span; it is stored next to
+        // the points, replacing a Steinmetz model the material had. MKF refuses points that do not
+        // determine the fit (one frequency, one flux density, too few points), and says why.
+        async fitSteinmetz() {
+            this.fitReport = null;
+            this.fitError = null;
+            this.fitting = true;
+            try {
+                const points = this.volumetricLossesPoints.map((point) => deepCopy(point));
+                const frequencies = points.map((point) => point.magneticFluxDensity.frequency);
+                const range = [Math.min(...frequencies), Math.max(...frequencies)];
+                const fit = await this.taskQueueStore.calculateSteinmetzCoefficients(points, [range]);
+                const steinmetz = { method: 'steinmetz', ranges: fit.coefficientsPerRange };
+                const methods = this.data.default;
+                const existing = methods.findIndex((method) => !Array.isArray(method) && method?.method === 'steinmetz');
+                if (existing >= 0) {
+                    methods.splice(existing, 1, steinmetz);
+                }
+                else {
+                    methods.push(steinmetz);
+                }
+                const errors = fit.errorPerRange.map((error) => `${(error * 100).toFixed(1)} %`).join(', ');
+                this.fitReport = `Steinmetz model fitted to ${points.length} points from ${range[0] / 1000} kHz to ${range[1] / 1000} kHz, average fit error ${errors}`;
+            }
+            catch (error) {
+                this.fitError = String(error?.message ?? error).replace(/^(Error: )?Exception: /, '');
+            }
+            finally {
+                this.fitting = false;
+            }
         },
         onRemovePoint(temperatureIndex, seriesIndex, index) {
             this.volumetricLossesPoints.splice(this.indexes[temperatureIndex][seriesIndex][index], 1);
@@ -223,9 +290,18 @@ export default {
                     if (event.dimension == 'value') {
                         this.volumetricLossesPoints[this.indexes[temperatureIndex][seriesIndex][index]].value = event.value;
                     }
+                    if (event.dimension == 'temperature') {
+                        this.volumetricLossesPoints[this.indexes[temperatureIndex][seriesIndex][index]].temperature = event.value;
+                    }
                 }
+                // A changed flux density, frequency or temperature can move the point to another
+                // curve (or another temperature): regroup now, as the data watcher is blocked below.
+                const regroup = event != null && ['magneticFluxDensity', 'frequency', 'temperature'].includes(event.dimension);
                 this.blockingRebounds = true;
                 setTimeout(() => this.blockingRebounds = false, 10);
+                if (regroup) {
+                    this.assignLocalData();
+                }
             }
         },
     }
@@ -233,6 +309,7 @@ export default {
 </script>
 
 <template>
+    <div>
     <PropertyTool
         v-if="localData.length > 0 && localData[0] != null"
         v-for="(temperature, temperatureIndex) in temperatures"
@@ -260,4 +337,35 @@ export default {
         :visualizerLineColor="$styleStore.magneticBuilder.main.color"
         :visualizerTextColor="$styleStore.magneticBuilder.main.color"
     />
+    <div v-if="volumetricLossesPoints.length > 0" class="vl-fit-row">
+        <button
+            :data-cy="dataTestLabel + '-fit-steinmetz-button'"
+            :style="$styleStore.magneticBuilder.addButton"
+            class="btn"
+            :disabled="fitting"
+            v-tooltip="tooltipsMagneticBuilder.materialLossesFitSteinmetz"
+            @click="fitSteinmetz"
+        >
+            {{'Fit Steinmetz model to the points'}}
+        </button>
+        <label v-if="fitReport != null" :data-cy="dataTestLabel + '-fit-steinmetz-report'" class="vl-fit-report">{{fitReport}}</label>
+        <label v-if="fitError != null" :data-cy="dataTestLabel + '-fit-steinmetz-error'" class="text-danger vl-fit-report">{{fitError}}</label>
+    </div>
+    </div>
 </template>
+
+<style scoped>
+.vl-fit-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0;
+}
+
+.vl-fit-report {
+    flex: 1 1 100%;
+    font-size: 0.9em;
+    white-space: pre-wrap;
+}
+</style>

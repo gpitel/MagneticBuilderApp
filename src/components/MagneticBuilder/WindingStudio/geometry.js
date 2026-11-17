@@ -30,6 +30,107 @@ function rectKey(r) {
 // Core
 // ---------------------------------------------------------------------------
 
+// The families the C++ Painter draws through paint_drum_family_core (PainterImpl paint_core).
+// Their cross-section is NOT an outer rectangle minus mirrored windows: a drum is a post between
+// two flanges, a drumRing adds a ring beside it, a semi-shielded drum a shell. The studio draws
+// those from MKF's own outline (the plot_core binding) instead of guessing it from the columns.
+export const PAINTER_OUTLINE_FAMILIES = new Set(['drum', 'rod', 'drumRing', 'drumSemishielded', 'molded']);
+
+// MKF coilPainterScale (src/Constants.h): painter SVG units are metres x 30000.
+const PAINTER_UNITS_PER_METER = 30000;
+
+export function coreShapeFamily(core) {
+    const shape = core?.functionalDescription?.shape;
+    if (shape != null && typeof shape === 'object') {
+        return shape.family ?? null;
+    }
+    return null;
+}
+
+export function needsPainterOutline(core) {
+    return PAINTER_OUTLINE_FAMILIES.has(coreShapeFamily(core));
+}
+
+// The ferrite polygons of a Painter SVG (plot_core), in studio millimetres. The painter already
+// flips y, so only the unit changes. Throws when the SVG holds no ferrite or a ferrite element
+// this reader does not understand: a partial outline must not pass for the core.
+export function parsePainterFerriteOutline(svg) {
+    if (typeof svg !== 'string' || !svg.trimStart().startsWith('<svg')) {
+        throw new Error(`MKF did not return a core drawing: ${String(svg).slice(0, 300)}`);
+    }
+    const polygons = [];
+    const elementPattern = /<(\w+)\b([^>]*\bclass="ferrite"[^>]*)>/g;
+    for (const match of svg.matchAll(elementPattern)) {
+        const [, tag, attributes] = match;
+        if (tag !== 'polygon') {
+            throw new Error(`MKF drew the core with a <${tag}> element, which the Winding Studio cannot read`);
+        }
+        const pointsMatch = attributes.match(/\bpoints="([^"]*)"/);
+        if (pointsMatch == null) {
+            throw new Error('MKF drew a ferrite polygon without points');
+        }
+        const points = pointsMatch[1].trim().split(/\s+/).map((pair) => {
+            const [x, y] = pair.split(',').map(Number);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) {
+                throw new Error(`MKF drew a ferrite polygon with an unreadable point "${pair}"`);
+            }
+            return [x * MM / PAINTER_UNITS_PER_METER, y * MM / PAINTER_UNITS_PER_METER];
+        });
+        polygons.push(points);
+    }
+    if (polygons.length === 0) {
+        throw new Error('MKF drew no ferrite for this core');
+    }
+    // The Painter draws these solids of revolution whole only under real winding; otherwise it
+    // draws the +x half. The studio always shows both sides of the post (it mirrors the turns too),
+    // and the far half is the same radii at -x (the Painter's own rule, paint_drum_family_core).
+    const onlyPositiveHalf = polygons.every((polygon) => polygon.every(([x]) => x >= 0));
+    if (onlyPositiveHalf) {
+        return [...polygons, ...polygons.map((polygon) => polygon.map(([x, y]) => [-x, y]))];
+    }
+    return polygons;
+}
+
+function boundingRect(polygons) {
+    let x0 = Infinity;
+    let y0 = Infinity;
+    let x1 = -Infinity;
+    let y1 = -Infinity;
+    for (const polygon of polygons) {
+        for (const [x, y] of polygon) {
+            x0 = Math.min(x0, x);
+            y0 = Math.min(y0, y);
+            x1 = Math.max(x1, x);
+            y1 = Math.max(y1, y);
+        }
+    }
+    return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
+
+// The core view of a family drawn from MKF's outline. No gaps are drawn: a drum's structural
+// clearances (drumRing rim, semi-shielded shell) are part of the outline, and the snapped
+// column-gap view of a two-piece set would put them inside solid ferrite.
+function buildPainterOutlineCoreView(core, outline) {
+    const processed = core.processedDescription;
+    if (processed == null) {
+        return null;
+    }
+    const columns = processed.columns ?? [];
+    const columnViews = columns.map((column, index) => ({
+        index,
+        type: column.type,
+        shape: column.shape,
+        rect: rectFromCenter(column.coordinates[0], column.coordinates[1] ?? 0, column.width, column.height ?? processed.height),
+    }));
+    return {
+        outer: boundingRect(outline),
+        cavities: [],
+        gaps: [],
+        columns: columnViews,
+        silhouette: outline.map((polygon) => polygon.map(([x, y]) => `${x},${y}`).join(' ')),
+    };
+}
+
 // The cross-section of every concentric (two-piece set) core reduces to the
 // outer silhouette rectangle minus the winding-window cavities. Whether a
 // mirrored cavity exists on the other side of the main column is data-driven:
@@ -592,17 +693,40 @@ export function buildConnectionViews(layout) {
     };
 }
 
-export function buildStudioModel(magnetic) {
+// `painterOutline` is the state of MKF's core outline for the families in
+// PAINTER_OUTLINE_FAMILIES: { status: 'loading' | 'ready' | 'error', polygons, reason }.
+export function buildStudioModel(magnetic, painterOutline = null) {
     const core = magnetic?.core;
     const coil = magnetic?.coil;
     if (core == null || coil == null) {
         return { valid: false, reason: 'No magnetic loaded' };
     }
+    // A core whose pieces belong to another shape (a refused shape change that left the previous
+    // core's geometry behind) is not this core: drawing it would show the old core under the new name.
+    const shapeName = typeof core.functionalDescription?.shape === 'string' ? core.functionalDescription.shape : core.functionalDescription?.shape?.name;
+    for (const piece of core.geometricalDescription ?? []) {
+        const pieceShape = typeof piece?.shape === 'string' ? piece.shape : piece?.shape?.name;
+        if (pieceShape != null && shapeName != null && pieceShape !== shapeName) {
+            return { valid: false, reason: `The core geometry belongs to ${pieceShape}, not to ${shapeName}; the core has not been recomputed for its shape` };
+        }
+    }
     const family = core.functionalDescription?.shape?.family ?? core.functionalDescription?.shape?.split?.(' ')?.[0]?.toLowerCase();
     if (family === 't') {
         return buildToroidalStudioModel(magnetic);
     }
-    const coreView = buildCoreView(core);
+    let coreView;
+    if (needsPainterOutline(core)) {
+        if (painterOutline == null || painterOutline.status === 'loading') {
+            return { valid: false, reason: 'Loading the core outline from MKF…' };
+        }
+        if (painterOutline.status === 'error') {
+            return { valid: false, reason: `MKF could not draw this core: ${painterOutline.reason}` };
+        }
+        coreView = buildPainterOutlineCoreView(core, painterOutline.polygons);
+    }
+    else {
+        coreView = buildCoreView(core);
+    }
     if (coreView == null) {
         return { valid: false, reason: 'Core has no processed description yet' };
     }

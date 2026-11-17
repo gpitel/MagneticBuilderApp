@@ -85,6 +85,8 @@ export default {
                 <BasicCoreSelector
                     :dataTestLabel="dataTestLabel"
                     :masStore="masStore"
+                    :showEffectiveParameters="showEffectiveParameters"
+                    :completeCoreOnMaterialChange="completeCoreOnMaterialChange"
                     :readOnly="readOnly"
                     :operatingPointIndex="operatingPointIndex"
                     :enableSimulation="enableSimulation"

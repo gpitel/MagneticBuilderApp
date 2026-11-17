@@ -45,6 +45,20 @@ export const useWindingStudioStore = defineStore("windingStudio", () => {
         customSectionRects.value = {};
     }
 
+    // Drop the drawn rectangles of the named sections (e.g. the sections of a
+    // window whose sections orientation changed: they were drawn for the other
+    // layout).
+    function clearCustomSectionRectsForSections(sectionNames) {
+        const dropped = new Set(sectionNames);
+        const kept = {};
+        for (const [sectionName, rect] of Object.entries(customSectionRects.value)) {
+            if (!dropped.has(sectionName)) {
+                kept[sectionName] = rect;
+            }
+        }
+        customSectionRects.value = kept;
+    }
+
     // A winding moved to another leg invalidates its drawn rectangles
     // (section names are "<winding> section <n>").
     function clearCustomSectionRectsForWinding(windingName) {
@@ -64,6 +78,7 @@ export const useWindingStudioStore = defineStore("windingStudio", () => {
         setCustomSectionRect,
         clearCustomSectionRects,
         clearCustomSectionRectsForWinding,
+        clearCustomSectionRectsForSections,
         windingStyleOverrides,
         setWindingStyleOverride,
     }

@@ -343,10 +343,16 @@ export default {
                 this.taskQueueStore.getCoreShapeFamilyDimensions(this.localData.family, this.localData.familySubtype, this.dimensionsExceptionsPerFamily, this.localData.dimensions);
             }
         },
-        familyUpdated() {
+        async familyUpdated() {
             this.imageUpToDate = false;
             this.dataUptoDate = false;
             this.core.functionalDescription.shape.family = deepCopy(this.localData.family);
+            // ABT #2372: the core type follows the family (EI -> pieceAndPlate, E -> twoPieceSet, ...),
+            // from MKF's rule. Keeping the previous family's type made an EI a mirrored E+E (twice le
+            // and volume), and the engine now refuses a type that contradicts the family.
+            const coreType = await this.taskQueueStore.getCoreTypeForShapeFamily(this.localData.family);
+            this.core.functionalDescription.type = coreType;
+            this.localCoreToDraw.functionalDescription.type = coreType;
             this.getFamilySubtypes();
 
             if (this.$settingsStore.magneticBuilderSettings.autoRedraw) {

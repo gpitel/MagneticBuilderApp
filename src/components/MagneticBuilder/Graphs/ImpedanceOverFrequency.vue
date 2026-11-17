@@ -5,7 +5,7 @@ import Dimension from '/WebSharedComponents/DataInput/Dimension.vue'
 import { removeTrailingZeroes, deepCopy, isMobile, toCamelCase } from '/WebSharedComponents/assets/js/utils.js'
 import LineVisualizer from '/WebSharedComponents/Common/LineVisualizer.vue'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
-import { describeGraphError, describeCurveDataLimits } from './graphErrors.js'
+import { describeGraphError, describeCurveDataLimits, graphFailureLevel } from './graphErrors.js'
 </script>
 
 <script>
@@ -109,7 +109,7 @@ export default {
     },
     watch: {
         errorMessage(message) {
-            reportNotice('ERROR', 'Impedance Over Frequency graph', message);
+            reportNotice(graphFailureLevel(message), 'Impedance Over Frequency graph', message);
         },
         '$stateStore.graphParameters': {
             handler(newValue, oldValue) {
@@ -235,8 +235,20 @@ export default {
                     :pointsColor="$styleStore.magneticBuilder.graphPointsColor.color"
                     :textColor="$styleStore.magneticBuilder.inputTextColor.color"
                 />
-                <div v-if="errorMessage == '' && !loading && dataLimitNotes.length > 0" :data-cy="dataTestLabel + '-Graph-DataLimits'" class="graph-data-limits">
-                    <div v-for="note in dataLimitNotes" :key="note">{{note}}</div>
+                <!-- Where the curve rests on estimated or missing material data. The sentences are long, so they
+                     sit behind a small pill and its tooltip, as the Fourier chart does with its hidden harmonics
+                     (Alf, 2026-11-05: no long text around the graphs). -->
+                <div v-if="errorMessage == '' && !loading && dataLimitNotes.length > 0" class="graph-data-limits">
+                    <span
+                        :data-cy="dataTestLabel + '-Graph-DataLimits'"
+                        class="graph-data-limits-hint"
+                        tabindex="0"
+                        role="note"
+                        :aria-label="dataLimitNotes.join(' ')"
+                        v-tooltip.top="{ value: dataLimitNotes.join('\n\n'), class: 'graph-data-limits-tooltip' }">
+                        <i class="pi pi-info-circle"></i>
+                        <span>Dashed: estimated material data</span>
+                    </span>
                 </div>
             </div>
         </div>
@@ -259,9 +271,21 @@ export default {
 }
 
 .graph-data-limits {
-    font-size: 0.85em;
-    opacity: 0.85;
     margin-top: 0.25rem;
+}
+
+.graph-data-limits-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    line-height: 1;
+    padding: 0.18rem 0.5rem;
+    background: rgba(var(--p-primary-rgb), 0.18);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.45);
+    border-radius: 999px;
+    cursor: help;
 }
 
 .graph-viz-col {
@@ -272,5 +296,19 @@ export default {
 .graph-loading {
     max-width: 60%;
     height: auto;
+}
+</style>
+
+<style>
+/* The tooltip is teleported to <body>, out of reach of the scoped styles. Its notes are long:
+   give it room so it reads as a few wide paragraphs, not a narrow column. */
+.graph-data-limits-tooltip {
+    max-width: min(44rem, 92vw) !important;
+}
+
+.graph-data-limits-tooltip .p-tooltip-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 0.8rem;
 }
 </style>

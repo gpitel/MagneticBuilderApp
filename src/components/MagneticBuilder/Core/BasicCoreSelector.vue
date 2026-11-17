@@ -7,6 +7,7 @@ import BasicCoreSubmenu from './BasicCoreSubmenu.vue'
 import { coreAdviserWeights, defaultUngappedGapping } from '/WebSharedComponents/assets/js/defaults.js'
 import * as Defaults from '/WebSharedComponents/assets/js/defaults.js'
 import CoreInfo from './CoreInfo.vue'
+import CoreEffectiveParameters from './CoreEffectiveParameters.vue'
 import CoreShapeSelector from './CoreShapeSelector.vue'
 import CoreMaterialTableModal, { buildMaterialRow } from './CoreMaterialTableModal.vue'
 import { useHistoryStore } from '../../../stores/history'
@@ -22,6 +23,7 @@ import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js
 // In the plain block, not <script setup>: methods below call it, and an Options
 // API method cannot see a <script setup> binding.
 import { applyAdvisedCore } from './applyAdvisedCore.js'
+import { shellMaterialIncompleteMessage } from './shellMaterial.js'
 
 export default {
     emits: ['customizeCore', 'gappingUpdated', 'coreProcessed', 'coreProcessingStarted'],
@@ -42,6 +44,14 @@ export default {
         masStore: {
             type: Object,
             required: true,
+        },
+        showEffectiveParameters: {
+            type: Boolean,
+            default: false,
+        },
+        completeCoreOnMaterialChange: {
+            type: Boolean,
+            default: false,
         },
         enableSimulation: {
             type: Boolean,
@@ -130,6 +140,13 @@ export default {
             pendingBobbinThickness,
             cachedMagnetic,
             changeMadeByUser: false,
+            // The magnetic as it was before the core change in progress (ABT #2410); put back whole when the
+            // engine refuses the new core or its bobbin. null when no change is in progress.
+            coreChangeSnapshot: null,
+            // Catalogue materials of type magneticEpoxy, offered as a semi-shielded drum's shell (ABT #2410).
+            // null until read from the engine.
+            shellCatalogueMaterialNames: null,
+            shellLocalData: { shellMaterial: null },
             updatingLocalData: false,
             _mountTimer: null,
         }
@@ -185,11 +202,65 @@ export default {
             const shapeMissing = shape == null
                 || (typeof shape === 'string' && shape === '')
                 || (typeof shape === 'object' && (shape.name == null || shape.name === ''));
-            const material = fd.material;
+            // A material list (a semi-shielded drum's [drum, shell]) names the core's own material first.
+            const material = Array.isArray(fd.material) ? fd.material[0] : fd.material;
             const materialMissing = material == null
                 || (typeof material === 'string' && material === '')
                 || (typeof material === 'object' && (material.name == null || material.name === ''));
             return shapeMissing || materialMissing;
+        },
+        isSemishieldedDrum() {
+            const shape = this.masStore.mas.magnetic.core?.functionalDescription?.shape;
+            return shape != null && typeof shape !== 'string' && shape.family === 'drumSemishielded';
+        },
+        /**
+         * The shell material a semi-shielded drum carries: functionalDescription.material[1], a core material
+         * of type magneticEpoxy (MKF Core::resolve_semishielded_shell_material, ABT #2410). Its name, or null.
+         * Older designs carry it as a deprecated magneticEpoxy coating naming it, which MKF still reads.
+         */
+        shellMaterialName() {
+            const functionalDescription = this.masStore.mas.magnetic.core?.functionalDescription;
+            if (functionalDescription == null) return null;
+            const material = functionalDescription.material;
+            if (Array.isArray(material) && material.length > 1) {
+                const shell = material[1];
+                const name = typeof shell === 'string' ? shell : shell?.name;
+                if (name != null && name !== '') return name;
+            }
+            const coating = functionalDescription.coating;
+            if (coating != null && typeof coating !== 'string' && coating.type === 'magneticEpoxy'
+                && typeof coating.material === 'string' && coating.material !== '') {
+                return coating.material;
+            }
+            return null;
+        },
+        /**
+         * A semi-shielded drum's return path is its magnetic-epoxy shell, a second material. MKF computes
+         * nothing for it until the core carries that shell material, and no catalogue drum states one: the
+         * panel says so instead of letting every calculation fail on it (ABT #2410). Never filled in with a
+         * guessed material.
+         */
+        semishieldedDrumNeedsShellMaterial() {
+            return this.isSemishieldedDrum && this.shellMaterialName == null;
+        },
+        /**
+         * A shell the design carries without the data the engine needs (a file whose material[1] has no
+         * permeability): the message saying what is missing, or null. MKF refuses such a shell, so the
+         * core is not simulated with it; this says why. Never filled in from the drum or a typical value.
+         */
+        shellMaterialIncomplete() {
+            if (!this.isSemishieldedDrum) return null;
+            const material = this.masStore.mas.magnetic.core?.functionalDescription?.material;
+            if (!Array.isArray(material) || material.length < 2 || typeof material[1] === 'string') return null;
+            return shellMaterialIncompleteMessage(material[1]);
+        },
+        /** The shell picker's options: the catalogue's magnetic epoxies, plus the design's own shell. */
+        shellMaterialOptions() {
+            const names = [...(this.shellCatalogueMaterialNames ?? [])];
+            if (this.shellMaterialName != null && !names.includes(this.shellMaterialName)) {
+                names.push(this.shellMaterialName);
+            }
+            return names;
         },
         magneticForVisualizer() {
             // Force re-evaluation when visualizer update is triggered
@@ -206,6 +277,20 @@ export default {
     watch: {
         errorMessage(message) {
             reportNotice('ERROR', 'Core', message);
+        },
+        isSemishieldedDrum: {
+            immediate: true,
+            handler(value) {
+                if (value && this.shellCatalogueMaterialNames == null) {
+                    this.loadShellCatalogueMaterials();
+                }
+            },
+        },
+        shellMaterialName: {
+            immediate: true,
+            handler(value) {
+                this.shellLocalData.shellMaterial = value;
+            },
         },
         loading(value) {
             this.taskQueueStore.coreAdviseBusy = value;
@@ -290,9 +375,14 @@ export default {
                                     this.masStore.mas.magnetic.coil.layersDescription = null;
                                     this.masStore.mas.magnetic.coil.sectionsDescription = null;
                                 }
+                                this.endCoreChange();
                                 // Note: BasicCoilSelector listens for bobbinFromCoreShapeGenerated
                                 // and will automatically trigger rewinding
-                            });
+                            })
+                            // A bobbin the engine cannot build for this core (e.g. wall and column
+                            // thicknesses that leave no winding window) is a refused change, not a
+                            // stale bobbin under the new core (ABT #2410).
+                            .catch((error) => this.refuseCoreChange(error));
                         }
                         else {
                         }
@@ -311,7 +401,8 @@ export default {
                             const coreHash = JSON.stringify(this.masStore.mas.magnetic.core);
 
                             if (coreHash != JSON.stringify(mas.magnetic.core)) {
-                                this.taskQueueStore.processCore(mas.magnetic.core);
+                                this.taskQueueStore.processCore(mas.magnetic.core)
+                                    .catch((error) => this.refuseCoreChange(error));
                             }
                             else if (this.changeMadeByUser && !this.$stateStore.loadingDesign) {
                                 // Core hash is the same but user changed shape - still need to regenerate bobbin
@@ -333,13 +424,21 @@ export default {
                                             this.masStore.mas.magnetic.coil.layersDescription = null;
                                             this.masStore.mas.magnetic.coil.sectionsDescription = null;
                                         }
-                                    });
+                                        this.endCoreChange();
+                                    })
+                                    .catch((error) => this.refuseCoreChange(error));
                                 }
                             }
                         }
                     }
                     else {
-                        console.error(args[1])
+                        // checkAndFixMas could not complete the changed core: the engine refused it.
+                        if (this.coreChangeSnapshot != null) {
+                            this.refuseCoreChange(args[1]);
+                        }
+                        else {
+                            console.error(args[1])
+                        }
                     }
                 }
             });
@@ -354,6 +453,54 @@ export default {
     methods: {
         inlineNotices() {
             return noticesShownInline();
+        },
+        /**
+         * A core change made in this panel (shape, material, gap, stacks) is applied whole or not at all
+         * (ABT #2410). The magnetic it starts from is kept until the engine has processed the new core and
+         * built its bobbin; a refusal puts it back, so the design never holds a core whose processed and
+         * geometrical descriptions, or bobbin, belong to another shape.
+         */
+        beginCoreChange() {
+            if (this.coreChangeSnapshot == null) {
+                this.coreChangeSnapshot = deepCopy(this.masStore.mas.magnetic);
+            }
+        },
+        endCoreChange() {
+            this.coreChangeSnapshot = null;
+            if (this.taskQueueStore.coreChangeRefusal !== '') {
+                this.taskQueueStore.coreChangeAccepted();
+            }
+        },
+        /**
+         * The engine refused the new core or its bobbin: the design goes back to the core it had, the
+         * dropdowns follow it, and the engine's reason is shown in Core Info and the Engine log.
+         */
+        refuseCoreChange(error) {
+            const reason = String(error?.message ?? error).replace(/^(Error: )?Exception: /, '');
+            if (this.coreChangeSnapshot != null) {
+                this.masStore.mas.magnetic = this.coreChangeSnapshot;
+                this.coreChangeSnapshot = null;
+            }
+            this.changeMadeByUser = false;
+            this.pendingBobbinThickness = null;
+            this.taskQueueStore.bobbinRegenerationPending = false;
+            this.assignLocalData(this.masStore.mas.magnetic.core);
+            this.updatingLocalData = true;
+            this.forceUpdate += 1;
+            this.$nextTick(() => { this.updatingLocalData = false; });
+            this.taskQueueStore.coreChangeRefused(reason);
+            this.errorMessage = `The core was not changed, the design keeps its previous core: ${reason}`;
+        },
+        /** The core type MKF builds this core's shape family as (core_type_for_shape_family, ABT #2372). */
+        async coreTypeOfShapeFamily(core) {
+            let shape = core.functionalDescription.shape;
+            if (typeof shape === 'string') {
+                shape = await this.taskQueueStore.processCoreShape(shape);
+            }
+            if (shape?.family == null) {
+                throw new Error(`The core shape ${shape?.name ?? ''} has no family, so its core type cannot be known`);
+            }
+            return this.taskQueueStore.getCoreTypeForShapeFamily(shape.family);
         },
         isStackable(shape) {
             // Accept an explicit shape so callers in mid-transition (shape just
@@ -390,20 +537,25 @@ export default {
                 this.localData["shapeFamily"] = deepCopy(core.functionalDescription.shape.family);
             }
 
-            if (typeof(core.functionalDescription.material) == 'string') {
-                if (core.functionalDescription.material != "") {
-                    this.localData["material"] = deepCopy(core.functionalDescription.material);
-                    this.taskQueueStore.processCoreMaterial(core.functionalDescription.material).then((coreMaterial) => {
-                        this.localData["materialManufacturer"] = coreMaterial.manufacturerInfo.name;
+            // A material list ([drum, magnetic-epoxy shell] on a semi-shielded drum) names the core's own
+            // material first; the shell has its own picker.
+            const coreMaterial = Array.isArray(core.functionalDescription.material)
+                ? core.functionalDescription.material[0]
+                : core.functionalDescription.material;
+            if (typeof(coreMaterial) == 'string') {
+                if (coreMaterial != "") {
+                    this.localData["material"] = deepCopy(coreMaterial);
+                    this.taskQueueStore.processCoreMaterial(coreMaterial).then((processedMaterial) => {
+                        this.localData["materialManufacturer"] = processedMaterial.manufacturerInfo.name;
                     })
                     .catch(error => {
                         console.error(error);
                     });
                 }
             }
-            else {
-                this.localData["material"] = deepCopy(core.functionalDescription.material.name);
-                this.localData["materialManufacturer"] = core.functionalDescription.material.manufacturerInfo.name;
+            else if (coreMaterial != null) {
+                this.localData["material"] = deepCopy(coreMaterial.name);
+                this.localData["materialManufacturer"] = coreMaterial.manufacturerInfo.name;
             }
 
             if (core.functionalDescription.shape != "" && core.functionalDescription.material != "") {
@@ -428,6 +580,47 @@ export default {
                     });
                 }
             }
+        },
+        /** The catalogue's magneticEpoxy materials (the engine's material summary), for the shell picker. */
+        async loadShellCatalogueMaterials() {
+            try {
+                const summary = await this.taskQueueStore.getCoreMaterialsSummary();
+                this.shellCatalogueMaterialNames = summary.filter((row) => row.materialType === 'magneticEpoxy').map((row) => row.name);
+            }
+            catch (error) {
+                this.errorMessage = `The shell materials could not be read from the engine: ${String(error?.message ?? error)}`;
+            }
+        },
+        /**
+         * The shell picked from the list: functionalDescription.material becomes [drum, shell] (ABT #2410).
+         * The design's own shell keeps its full data; a catalogue one is named. No magneticEpoxy coating is
+         * written, and a deprecated one left from an older design is dropped, as it would contradict the list.
+         */
+        shellMaterialUpdated(name) {
+            const functionalDescription = this.masStore.mas.magnetic.core.functionalDescription;
+            const list = Array.isArray(functionalDescription.material) ? functionalDescription.material : [functionalDescription.material];
+            const current = list.length > 1 ? list[1] : null;
+            const currentName = typeof current === 'string' ? current : current?.name;
+            if (name === currentName) return;
+            this.beginCoreChange();
+            functionalDescription.material = [list[0], name];
+            const coating = functionalDescription.coating;
+            if (coating != null && (coating === 'magneticEpoxy' || coating.type === 'magneticEpoxy')) {
+                functionalDescription.coating = null;
+            }
+            this.$emit('coreProcessingStarted');
+            this.taskQueueStore.processCore(this.masStore.mas.magnetic.core).then((core) => {
+                this.masStore.mas.magnetic.core = core;
+                this.endCoreChange();
+                this.$emit('coreProcessed');
+            })
+            .catch((error) => this.refuseCoreChange(error));
+        },
+        /** Opens the builder's material editor on the shell (the Customize flow, material page). */
+        defineShellMaterial() {
+            this.taskQueueStore.coreMaterialEditTarget = 'shell';
+            this.$stateStore.magneticBuilder.submode.core = this.$stateStore.MagneticBuilderCoreSubmodes.Material;
+            this.$emit('customizeCore');
         },
         getMaterialNames() {
             // Power/filter designs need core losses, so only offer materials the
@@ -468,27 +661,40 @@ export default {
                 this.taskQueueStore.checkAndFixMas(mas);
             }
             else {
+                this.beginCoreChange();
                 this.masStore.mas.magnetic.core.name = "Custom";
                 this.changeMadeByUser = true;
+                // A new shape gets the bobbin MKF builds for it: the wall and column thicknesses kept from the
+                // previous core's bobbin need not leave any winding window on it (a drum, ABT #2410).
+                this.pendingBobbinThickness = null;
                 this.taskQueueStore.processCoreShape(value).then((shape) => {
                     if (this.localData.material == null) {
                         this.masStore.mas.magnetic.core.functionalDescription.shape = shape;
+                        this.coreChangeSnapshot = null;
                         // Cannot generate bobbin without material - backend requires it
                     }
                     else {
                         const mas = deepCopy(this.masStore.mas);
                         mas.magnetic.core.functionalDescription.shape = shape;
+                        // The processed and geometrical descriptions describe the previous shape: they are
+                        // computed again for this one (checkAndFixMas), never carried under it (ABT #2410).
+                        mas.magnetic.core.processedDescription = null;
+                        mas.magnetic.core.geometricalDescription = null;
 
                         if (!this.isStackable(shape)) {
                             mas.magnetic.core.functionalDescription.numberStacks = 1;
+                        }
+                        // The magnetic-epoxy shell (material[1]) belongs to a semi-shielded drum: any other
+                        // shape keeps only the core's own material (ABT #2410).
+                        const material = mas.magnetic.core.functionalDescription.material;
+                        if (Array.isArray(material) && shape.family !== 'drumSemishielded') {
+                            mas.magnetic.core.functionalDescription.material = material[0];
                         }
 
                         this.taskQueueStore.checkAndFixMas(mas);
                     }
                 })
-                .catch(error => {
-                    console.error(error);
-                });
+                .catch((error) => this.refuseCoreChange(error));
             }
         },
         openShapeTable() {
@@ -612,7 +818,20 @@ export default {
         },
         materialUpdated(value) {
             this.changeMadeByUser = true;
-            
+
+            // Shape picked before any material: shapeUpdated() could only store the shape, so the core still has
+            // the type and gapping it had before (twoPieceSet, three residual gaps). processCore on that sends a
+            // toroid as a two-piece set and the engine refuses it (bad_optional_access), leaving no effective
+            // parameters. Complete the core through checkAndFixMas instead, as shapeUpdated() does when the
+            // material is already known. Only for hosts that ask for it (completeCoreOnMaterialChange, CoreDataX), so
+            // other builders keep their behaviour.
+            if (this.completeCoreOnMaterialChange && this.masStore.mas.magnetic.core.processedDescription == null) {
+                const mas = deepCopy(this.masStore.mas);
+                mas.magnetic.core.functionalDescription.material = value;
+                this.taskQueueStore.checkAndFixMas(mas);
+                return;
+            }
+
             // Save current bobbin wall and column thickness before material change
             const currentBobbin = this.masStore.mas.magnetic.coil.bobbin;
             this.pendingBobbinThickness = {
@@ -620,24 +839,31 @@ export default {
                 columnThickness: currentBobbin?.processedDescription?.columnThickness
             };
             
-            this.taskQueueStore.changeCoreMaterial(value, deepCopy(this.masStore.mas.magnetic.core)).then((core) => {
-                // Ensure default gapping is set so core losses can be calculated
-                if (!core.functionalDescription.gapping || (core.functionalDescription.type == 'twoPieceSet' && core.functionalDescription.gapping.length === 0)) {
-                    core.functionalDescription.gapping = deepCopy(defaultUngappedGapping);
+            this.beginCoreChange();
+            this.taskQueueStore.changeCoreMaterial(value, deepCopy(this.masStore.mas.magnetic.core)).then(async (core) => {
+                // An ungapped two-piece set carries the residual gaps of its mating halves, so core losses can
+                // be calculated. Only a two-piece set: whether the core is one is MKF's family rule, not the
+                // stored type, which an older design may have wrong (a drum stored as twoPieceSet). A drum
+                // given residual gaps here was refused by MKF (ABT #2410); other types keep their gapping, and
+                // a core with none gets an empty one for MKF to derive what the shape has.
+                const coreType = await this.coreTypeOfShapeFamily(core);
+                if (coreType == 'twoPieceSet') {
+                    if (!core.functionalDescription.gapping || core.functionalDescription.gapping.length === 0) {
+                        core.functionalDescription.gapping = deepCopy(defaultUngappedGapping);
+                    }
+                }
+                else if (!core.functionalDescription.gapping) {
+                    core.functionalDescription.gapping = [];
                 }
                 this.masStore.mas.magnetic.core = core;
 
-                this.taskQueueStore.processCore(this.masStore.mas.magnetic.core).then((core) => {
-                    this.localData["numberStacks"] = deepCopy(core.functionalDescription.numberStacks);
-                    this.localData["gapping"] = deepCopy(core.functionalDescription.gapping);
-                    this.updatingLocalData = true;
-                    this.forceUpdate += 1;
-                    this.$nextTick(() => { this.updatingLocalData = false; });
-                    // Note: Bobbin thickness will be restored in coreProcessed handler after bobbin regeneration
-                })
-                .catch(error => {
-                    console.error(error);
-                });
+                const processedCore = await this.taskQueueStore.processCore(this.masStore.mas.magnetic.core);
+                this.localData["numberStacks"] = deepCopy(processedCore.functionalDescription.numberStacks);
+                this.localData["gapping"] = deepCopy(processedCore.functionalDescription.gapping);
+                this.updatingLocalData = true;
+                this.forceUpdate += 1;
+                this.$nextTick(() => { this.updatingLocalData = false; });
+                // Note: Bobbin thickness will be restored in coreProcessed handler after bobbin regeneration
                 
                 // Ensure coil has at least one turn so core losses can be calculated
                 const coil = this.masStore.mas.magnetic.coil;
@@ -645,10 +871,12 @@ export default {
                 if (!hasValidCoil && coil?.functionalDescription?.length > 0) {
                     coil.functionalDescription[0].numberTurns = 1;
                 }
-            }) 
+            })
+            .catch((error) => this.refuseCoreChange(error));
         },
         numberStacksUpdated(value) {
             if (this.updatingLocalData) return;
+            this.beginCoreChange();
             this.changeMadeByUser = true;
             this.masStore.mas.magnetic.core.functionalDescription.numberStacks = value;
             // Set image as outdated immediately
@@ -659,26 +887,29 @@ export default {
                 // will addToHistory with the fully wound coil state.
                 this.$emit('coreProcessed');
             })
-            .catch(error => {
-                console.error(error);
-            });
+            .catch((error) => this.refuseCoreChange(error));
         },
         gappingUpdated(value) {
+            this.beginCoreChange();
             this.masStore.mas.magnetic.core.functionalDescription.gapping = value;
             this.$emit('gappingUpdated');
             // Set image as outdated immediately
             this.$emit('coreProcessingStarted');
             this.taskQueueStore.processCore(this.masStore.mas.magnetic.core).then((core) => {
                 this.masStore.mas.magnetic.core = core;
+                // A gap change regenerates no bobbin: the change is complete here.
+                this.endCoreChange();
                 // Don't addToHistory here — the subsequent wind() completion
                 // will addToHistory with the fully wound coil state.
                 this.$emit('coreProcessed');
             })
-            .catch(error => {
-                console.error(error);
+            .catch((error) => {
+                this.refuseCoreChange(error);
             });
         },
         adviseCoreRequested() {
+            // A new advise replaces the last one's error (and reports its own, even when it is the same).
+            this.errorMessage = "";
             this.loading = true;
             setTimeout(() => this.adviseCore(), 100);
         },
@@ -716,13 +947,13 @@ export default {
                 .catch(error => {
                     // A zero-candidate advise and a failed advise read differently
                     // to the user: one is "relax the requirements", the other is
-                    // "something broke".
-                    this.errorMessage = /no candidate/i.test(error?.message ?? '')
-                        ? "No core can be advised for these requirements. Try another core-advise mode in Settings, or relax the requirements."
-                        : "No core can be advised. You are on your own.";
+                    // "something broke". Both say the engine's reason, and stay until
+                    // dismissed or replaced by the next advise.
+                    this.errorMessage = error?.noCandidate === true
+                        ? `No core can be advised for these requirements: ${error.engineReason} Try another core-advise mode in Settings, or relax the requirements.`
+                        : `The core adviser failed: ${error?.message ?? String(error)}`;
                     this.loading = false;
                     this.$emit('coreProcessed', false, error);
-                    setTimeout(() => {this.errorMessage = ""}, 10000);
                 });
             }
             else {
@@ -879,6 +1110,49 @@ export default {
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
                         />
                     </div>
+                    <div
+                        v-if="isSemishieldedDrum && localData.shape != '' && !loading"
+                        class="core-config-cell core-config-cell-wide core-shell-cell"
+                        :data-cy="dataTestLabel + '-Core-ShellMaterial'"
+                    >
+                        <ElementFromList
+                            v-if="shellMaterialOptions.length > 0"
+                            v-tooltip="tooltipsMagneticBuilder.coreShellMaterial"
+                            :disabled="readOnly"
+                            class="text-left"
+                            :dataTestLabel="dataTestLabel + '-ShellMaterialNames'"
+                            :name="'shellMaterial'"
+                            :replaceTitle="'Shell material'"
+                            :titleSameRow="true"
+                            :justifyContent="true"
+                            v-model="shellLocalData"
+                            :options="shellMaterialOptions"
+                            @update="shellMaterialUpdated"
+                            :labelWidthProportionClass="'col-12 md:col-5'"
+                            :valueWidthProportionClass="'col-12 md:col-7'"
+                            :valueFontSize="$styleStore.magneticBuilder.inputFontSize"
+                            :labelFontSize="$styleStore.magneticBuilder.inputTitleFontSize"
+                            :labelBgColor="$styleStore.magneticBuilder.inputLabelBgColor"
+                            :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
+                            :textColor="$styleStore.magneticBuilder.inputTextColor"
+                        />
+                        <label
+                            v-else-if="shellCatalogueMaterialNames != null"
+                            v-tooltip="tooltipsMagneticBuilder.coreShellMaterial"
+                            :data-cy="dataTestLabel + '-ShellMaterial-none'"
+                            class="core-shell-note"
+                        >Shell material: no catalogue material is a magnetic epoxy yet, define the shell's own.</label>
+                        <button
+                            v-if="!readOnly && enableCustomize"
+                            type="button"
+                            :data-cy="dataTestLabel + '-Core-DefineShellMaterial-button'"
+                            class="core-shell-define"
+                            v-tooltip="tooltipsMagneticBuilder.coreShellMaterialDefine"
+                            @click="defineShellMaterial"
+                        >
+                            <i class="pi pi-sliders-h mr-2"></i>{{ shellMaterialName == null ? 'Define shell material' : 'Edit shell material' }}
+                        </button>
+                    </div>
                     <h5 v-if="localData.shape == '' && !loading" class="text-danger my-2 col-12">Select a family and a shape for the core</h5>
 
                     <div v-if="isStackable() && localData.shape != '' && !loading" class="core-config-cell core-config-cell-wide">
@@ -923,6 +1197,17 @@ export default {
                     </div>
                 </div>
 
+                <h6
+                    v-if="semishieldedDrumNeedsShellMaterial && !loading"
+                    :data-cy="dataTestLabel + '-Core-ShellMaterialMissing'"
+                    class="text-danger my-2 col-12"
+                >A semi-shielded drum needs the material of its magnetic-epoxy shell: its flux returns through that shell, so nothing can be calculated for this core until the shell material is given. No catalogue drum states it.</h6>
+                <h6
+                    v-if="shellMaterialIncomplete != null && !loading"
+                    :data-cy="dataTestLabel + '-Core-ShellMaterialIncomplete'"
+                    class="text-danger my-2 col-12"
+                >{{ shellMaterialIncomplete }}</h6>
+
                 <CoreInfo 
                     v-if="showInfoPanel && !loading && enableSimulation"
                     ref="coreInfo"
@@ -931,6 +1216,12 @@ export default {
                     :masStore="masStore"
                     :operatingPointIndex="operatingPointIndex"
                     :enableAutoSimulation="enableAutoSimulation"
+                />
+
+                <CoreEffectiveParameters
+                    v-if="showEffectiveParameters && !loading"
+                    :dataTestLabel="dataTestLabel + '-CoreEffectiveParameters'"
+                    :masStore="masStore"
                 />
 
                 <BasicCoreSubmenu 
@@ -948,13 +1239,62 @@ export default {
                     @adjustTurnsToInductance="adjustTurnsToInductance"
                 />
                 <label v-if="infoMessage" :data-cy="dataTestLabel + '-Core-adjust-info'" class="text-success col-12 pt-1" style="font-size: 0.7em">{{infoMessage}}</label>
-                <label v-if="inlineNotices()" class="text-danger col-12 pt-1" style="font-size: 0.7em">{{errorMessage}}</label>
+                <div v-if="inlineNotices() && errorMessage" class="core-error col-12 pt-1">
+                    <label :data-cy="dataTestLabel + '-Core-error'" class="text-danger" style="font-size: 0.7em">{{errorMessage}}</label>
+                    <button
+                        type="button"
+                        class="core-error-dismiss text-danger"
+                        :data-cy="dataTestLabel + '-Core-error-dismiss'"
+                        aria-label="Dismiss this message"
+                        v-tooltip="'Dismiss this message'"
+                        @click="errorMessage = ''"
+                    ><i class="pi pi-times"></i></button>
+                </div>
             </div>
         </div>
     </div>
 </template>
 
 <style scoped>
+/* Shell material of a semi-shielded drum (ABT #2410): its picker, or the note that the catalogue has
+ * none, and the button that opens the material editor on the shell. */
+.core-shell-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.core-shell-note {
+    font-size: 0.8rem;
+    color: var(--p-text-muted-color, var(--p-white));
+    opacity: 0.85;
+}
+.core-shell-define {
+    align-self: flex-start;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: transparent;
+    color: var(--p-primary);
+    border: 1px solid rgba(var(--p-primary-rgb), 0.6);
+}
+.core-shell-define:hover {
+    filter: brightness(1.12);
+}
+.core-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+}
+.core-error-dismiss {
+    flex: none;
+    background: transparent;
+    border: none;
+    padding: 0 0.2rem;
+    font-size: 0.7em;
+    cursor: pointer;
+}
 .core-config-panel {
     background: linear-gradient(145deg, color-mix(in srgb, var(--p-gray-600) 6%, transparent) 0%, color-mix(in srgb, var(--p-gray-600) 2%, transparent) 100%);
     border: 1px solid color-mix(in srgb, var(--p-gray-600) 20%, transparent);

@@ -33,7 +33,8 @@ function getRestrictedShapeFamilies() {
 // family whose code contains an 'h', and the same 5-term condition was pasted five times).
 // pqi/ut/ui/h await their UI work; the drum-era families (drum, drumRing, drumSemishielded)
 // and molded await the 3D/preview path (MVB.js drawing + WASM bump) — unhide them there.
-const UI_HIDDEN_SHAPE_FAMILIES = new Set(['pqi', 'ut', 'ui', 'h']);
+// drumSemishielded, rod and molded are hidden for now by Alf's decision (2026-11-15).
+const UI_HIDDEN_SHAPE_FAMILIES = new Set(['pqi', 'ut', 'ui', 'h', 'drumSemishielded', 'rod', 'molded']);
 
 // drum, drumRing, drumSemishielded and molded came OFF this list once the 3D/preview path
 // this comment used to wait for actually landed: MVB++ has ShapeMolded and
@@ -218,6 +219,19 @@ function toArray(vectorOrArray) {
     return vectorOrArray;
 }
 
+// The core adviser's log ("[time] [LEVEL] [Core adviser] text" per line, as one string or a list)
+// as { level, text, raw } lines.
+function coreAdviserLogLines(log) {
+    if (log == null) {
+        return [];
+    }
+    const lines = Array.isArray(log) ? log.map(String) : String(log).split('\n');
+    return lines.map((raw) => raw.trim()).filter((raw) => raw !== '').map((raw) => {
+        const match = raw.match(/^\[[^\]]*\]\s*\[(TRACE|DEBUG|INFO|WARNING|ERROR|CRITICAL)\]\s*(?:\[[^\]]*\]\s*)?(.*)$/);
+        return match ? { level: match[1], text: match[2].trim(), raw } : { level: null, text: raw, raw };
+    });
+}
+
 export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
     state: () => ({
         task_standard_response_delay: 20,
@@ -230,6 +244,14 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         // advise into these flags and disables its Advise buttons on the other's.
         coreAdviseBusy: false,
         wireAdviseBusy: false,
+        // The engine's reason for refusing the last core change made in the core panel (a shape, material,
+        // gap or stack change), or ''. The design went back to its previous core; Core Info shows this until
+        // a core change is accepted (ABT #2410).
+        coreChangeRefusal: '',
+        // Which material the advanced core editor edits: 'core' (functionalDescription.material, or the
+        // drum's entry of a material list) or 'shell' (a semi-shielded drum's magnetic-epoxy shell,
+        // functionalDescription.material[1], ABT #2410). Set by the panel that opens the editor.
+        coreMaterialEditTarget: 'core',
         _windingBlockTimer: null,
         _windingChangedTimer: null,
     }),
@@ -258,6 +280,16 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         },
 
         masCheckedAndFixed(success = true, dataOrMessage = '') {
+        },
+
+        // A core change the engine refused (ABT #2410): the core panel put the previous core back, and
+        // every panel that shows the core follows it (the shape selector, Core Info).
+        coreChangeRefused(message) {
+            this.coreChangeRefusal = message;
+        },
+
+        coreChangeAccepted() {
+            this.coreChangeRefusal = '';
         },
 
         async checkAndFixMas(mas) {
@@ -377,6 +409,26 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             }
         },
 
+        // Fill factor k_f of a tape-wound core and its source (MKF Core::get_tape_wound_fill_factor_with_source),
+        // the factor already applied to the effective area calculate_core_data returns. null when the core is
+        // not tape-wound (ferrite, powder, laminated stacks). Throws with the engine's message otherwise.
+        async getTapeWoundFillFactor(core) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            if (typeof mkf.get_tape_wound_fill_factor !== 'function') {
+                throw new Error('This engine build has no get_tape_wound_fill_factor (needs WebLibMKF with the fill-factor binding)');
+            }
+            const request = deepCopy(core);
+            request.geometricalDescription = null;
+            request.processedDescription = null;
+            const result = await mkf.get_tape_wound_fill_factor(JSON.stringify(request));
+            if (result.startsWith('Exception')) {
+                throw new Error(result);
+            }
+            return JSON.parse(result);
+        },
+
         coreFromShapeProcessed(success = true, dataOrMessage = '') {
         },
 
@@ -454,6 +506,41 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
 
             setTimeout(() => {this.coreShapeFamiliesGotten(true, coreShapeFamilies);}, this.task_standard_response_delay);
             return coreShapeFamilies;
+        },
+
+        // ABT #2372: the MAS core type a shape family is built as (EI -> pieceAndPlate, E -> twoPieceSet,
+        // T -> toroidal, ...), from MKF's single family -> type rule. A family change sets the core's type
+        // from this; keeping the previous family's type is what made an EI a mirrored E+E.
+        async getCoreTypeForShapeFamily(family) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+            const result = await mkf.get_core_type_for_shape_family(String(family));
+            if (result.startsWith('Exception')) {
+                throw new Error(result);
+            }
+            return result;
+        },
+
+        // The current catalogue name of a core shape, as MKF resolves it: MAS renames shapes and keeps
+        // the old name as an alias, so a design may name its shape by a name the catalogue replaced.
+        // Throws what MKF answers for a name it does not know.
+        async getCurrentShapeName(shapeName) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+            const result = await mkf.get_shape_data(String(shapeName));
+            // A name the catalogue does not know at all is answered, not thrown: the design keeps it
+            // and its stored dimensions (old MAS always loads). Any other engine failure throws.
+            if (result.startsWith('Exception') && result.includes('[CORE_SHAPE_NOT_FOUND]')) {
+                return { found: false, reason: result };
+            }
+            if (result.startsWith('Exception')) {
+                throw new Error(result);
+            }
+            const name = JSON.parse(result).name;
+            if (typeof name !== 'string' || name === '') {
+                throw new Error(`MKF returned core shape '${shapeName}' without a name`);
+            }
+            return { found: true, name };
         },
 
         coreShapeFamilySubtypesGotten(success = true, dataOrMessage = '') {
@@ -667,18 +754,25 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
 
         /**
          * Primary turns that give the required magnetizing inductance with the
-         * core's current gapping. The engine reports failures as -1 (its message
-         * goes to the worker console), so that is turned into a thrown error here.
+         * core's current gapping. The engine answers a JSON number, or
+         * "Exception: <its message>", which is thrown as is (ABT #2410).
          */
         async calculateNumberTurnsFromGappingAndInductance(core, coil, inputs, modelsData) {
             const mkf = await waitForMkf();
             await mkf.ready;
             const result = await mkf.calculate_number_turns_from_gapping_and_inductance(
                 JSON.stringify(core), JSON.stringify(coil), JSON.stringify(inputs), JSON.stringify(modelsData));
-            if (!(result > 0)) {
-                throw new Error('Exception: calculate_number_turns_from_gapping_and_inductance failed (worker returned ' + result + '); see the worker console for the engine message');
+            if (typeof result !== 'string') {
+                throw new Error('Exception: calculate_number_turns_from_gapping_and_inductance answered a ' + typeof result + ' (' + result + '), not a string: libMKF is older than this builder');
             }
-            return result;
+            if (result.startsWith('Exception')) {
+                throw new Error(result);
+            }
+            const numberTurns = JSON.parse(result);
+            if (!(numberTurns > 0)) {
+                throw new Error('Exception: calculate_number_turns_from_gapping_and_inductance answered ' + result + ' turns');
+            }
+            return numberTurns;
         },
 
         coreLossesCalculated(success = true, dataOrMessage = '') {
@@ -757,6 +851,12 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                     }
                     else {
                         coreLossesData = JSON.parse(result);
+                        // Since ABT #2273 the engine always states whether the core was held at its
+                        // material's data limit. An engine that does not is older than this web: its
+                        // silence would read as "not held".
+                        if (typeof coreLossesData.coreHeldAtDataLimit !== 'boolean') {
+                            throw new Error('Exception: the engine did not say whether the core was held at its material data limit (coreHeldAtDataLimit); it is older than this web app');
+                        }
                     }
                 }
 
@@ -812,7 +912,14 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
         },
 
         async changeCoreMaterial(materialName, core) {
-            core.functionalDescription.material = materialName;
+            // A material list ([drum, magnetic-epoxy shell] on a semi-shielded drum, ABT #2410): the
+            // change is to the core's own material, its first entry; the other pieces keep theirs.
+            if (Array.isArray(core.functionalDescription.material)) {
+                core.functionalDescription.material = [materialName, ...core.functionalDescription.material.slice(1)];
+            }
+            else {
+                core.functionalDescription.material = materialName;
+            }
             core.name = "Custom";
             core.manufacturerInfo = null;
             if (core.geometricalDescription != null) {
@@ -1001,13 +1108,24 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                     settings["useToroidalCores"] = adviserSettings.allowToroidalCores;
                     settings["useOnlyCoresInStock"] = adviserSettings.useOnlyCoresInStock;
                 }
-                const enableTemperatureFilter = adviserSettings.enableTemperatureFilter === true;
-                settings["coreAdviserEnableTemperatureFilter"] = enableTemperatureFilter;
-                if (enableTemperatureFilter) {
-                    if (!Number.isFinite(adviserSettings.maximumTemperature)) {
-                        throw new Error(`The core adviser temperature filter is on but its maximum temperature is ${JSON.stringify(adviserSettings.maximumTemperature)}`);
+                // The temperature gate is the engine's own setting; the user's choice lives in
+                // adviserSettings.coreAdviserEnableTemperatureFilter / coreAdviserMaximumTemperature,
+                // where null (or a host without these keys) means the engine's own value, which
+                // is then left as it is. The old enableTemperatureFilter key no longer exists, so
+                // reading it switched the gate off on every advise.
+                const enableTemperatureFilter = adviserSettings.coreAdviserEnableTemperatureFilter;
+                if (enableTemperatureFilter != null) {
+                    if (typeof enableTemperatureFilter !== 'boolean') {
+                        throw new Error(`The core adviser temperature filter setting must be true or false, got ${JSON.stringify(enableTemperatureFilter)}`);
                     }
-                    settings["coreAdviserMaximumTemperature"] = adviserSettings.maximumTemperature;
+                    settings["coreAdviserEnableTemperatureFilter"] = enableTemperatureFilter;
+                }
+                const maximumTemperature = adviserSettings.coreAdviserMaximumTemperature;
+                if (maximumTemperature != null) {
+                    if (!Number.isFinite(maximumTemperature)) {
+                        throw new Error(`The core adviser maximum temperature must be a number, got ${JSON.stringify(maximumTemperature)}`);
+                    }
+                    settings["coreAdviserMaximumTemperature"] = maximumTemperature;
                 }
                 if (!('preferredWireStandard' in settings)) {
                     throw new Error('Engine settings do not expose preferredWireStandard: libMKF is older than the wire-standard preference (ABT #1110)');
@@ -1029,12 +1147,20 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 return data;
             }
             else {
-                // Surface the MKF Core Adviser log so we can see WHY every
-                // candidate was rejected (gap too large, temperature, losses, etc).
-                const logSummary = Array.isArray(log)
-                    ? log.slice(-20).join('\n')
-                    : (typeof log === 'string' ? log : JSON.stringify(log));
-                throw new Error(`No suitable core found for the given requirements\n--- MKF Core Adviser log ---\n${logSummary}`);
+                // No candidate: the reason is what the adviser logged (every candidate culled by a
+                // gap limit, a temperature, missing material data, ...). The error is flagged so
+                // the Core panel can tell it from an adviser that failed.
+                const engineLog = coreAdviserLogLines(log);
+                const warnings = engineLog.filter((line) => line.level === 'WARNING' || line.level === 'ERROR' || line.level === 'CRITICAL');
+                const reasonLines = [...new Set((warnings.length > 0 ? warnings : engineLog).map((line) => line.text))].slice(-3);
+                const engineReason = reasonLines.length > 0
+                    ? reasonLines.map((text) => /[.!?)]$/.test(text) ? text : text + '.').join(' ')
+                    : 'The engine logged no reason.';
+                const error = new Error(`The core adviser returned no candidate for these requirements. ${engineReason}`);
+                error.noCandidate = true;
+                error.engineReason = engineReason;
+                error.engineLog = engineLog.map((line) => line.raw);
+                throw error;
             }
         },
 
@@ -1085,6 +1211,29 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
                 setTimeout(() => {this.complexPermeabilityGotten(true, complexPermeability);}, this.task_standard_response_delay);
                 return complexPermeability;
             }
+        },
+
+        steinmetzCoefficientsCalculated(success = true, dataOrMessage = '') {
+        },
+
+        // MKF fits Steinmetz coefficients to measured volumetric-loss points (CoreLossesSteinmetzModel::
+        // calculate_steinmetz_coefficients). It throws on points that do not determine the fit (one
+        // frequency, one flux density or too few points per range); that message is passed on as is.
+        async calculateSteinmetzCoefficients(volumetricLossesPoints, frequencyRanges) {
+            const mkf = await waitForMkf();
+            await mkf.ready;
+
+            const result = await mkf.calculate_steinmetz_coefficients(
+                JSON.stringify(volumetricLossesPoints),
+                JSON.stringify(frequencyRanges)
+            );
+            if (typeof result === 'string' && result.startsWith('Exception')) {
+                setTimeout(() => { this.steinmetzCoefficientsCalculated(false, result); }, this.task_standard_response_delay);
+                throw new Error(result);
+            }
+            const coefficients = JSON.parse(result);
+            setTimeout(() => { this.steinmetzCoefficientsCalculated(true, coefficients); }, this.task_standard_response_delay);
+            return coefficients;
         },
 
         defaultsGotten(success = true, dataOrMessage = '') {
@@ -1290,13 +1439,22 @@ export const useTaskQueueStore = defineStore('magneticBuilderTaskQueue', {
             data.turnsRatio = coil.functionalDescription[0].numberTurns / coil.functionalDescription[windingIndex].numberTurns;
             data.dcResistancePerMeter = await mkf.calculate_dc_resistance_per_meter(wireString, operatingPoints?.conditions?.ambientTemperature || 25);
 
+            // These bindings answer -1 when MKF refuses (its reason goes to the worker's console). A -1
+            // is not a figure: divided into a current density it showed -0.08 uA/mm2 (ABT #2277).
+            const refused = (value, what) => {
+                if (value === -1) {
+                    throw new Error(`Exception: the engine could not calculate the ${what} of winding '${coil.functionalDescription[windingIndex].name}' (its current may lack processed data)`);
+                }
+                return value;
+            };
             if (hasCurrentData) {
-                data.skinAcResistancePerMeter = await mkf.calculate_skin_ac_resistance_per_meter(wireString, currentString, operatingPoints.conditions.ambientTemperature);
-                data.skinAcFactor = await mkf.calculate_skin_ac_factor(wireString, currentString, operatingPoints.conditions.ambientTemperature);
-                data.dcLossesPerMeter = await mkf.calculate_dc_losses_per_meter(wireString, currentString, operatingPoints.conditions.ambientTemperature);
-                data.skinAcLossesPerMeter = await mkf.calculate_skin_ac_losses_per_meter(wireString, currentString, operatingPoints.conditions.ambientTemperature);
-                data.effectiveCurrentDensity = (await mkf.calculate_effective_current_density(wireString, currentString, operatingPoints.conditions.ambientTemperature)) / 1000000 / coil.functionalDescription[windingIndex].numberParallels;
-                data.effectiveSkinDepth = await mkf.calculate_effective_skin_depth(wireMaterial, currentString, operatingPoints.conditions.ambientTemperature);
+                const temperature = operatingPoints.conditions.ambientTemperature;
+                data.skinAcResistancePerMeter = refused(await mkf.calculate_skin_ac_resistance_per_meter(wireString, currentString, temperature), 'skin-effect AC resistance');
+                data.skinAcFactor = refused(await mkf.calculate_skin_ac_factor(wireString, currentString, temperature), 'skin-effect AC factor');
+                data.dcLossesPerMeter = refused(await mkf.calculate_dc_losses_per_meter(wireString, currentString, temperature), 'DC losses');
+                data.skinAcLossesPerMeter = refused(await mkf.calculate_skin_ac_losses_per_meter(wireString, currentString, temperature), 'skin-effect AC losses');
+                data.effectiveCurrentDensity = refused(await mkf.calculate_effective_current_density(wireString, currentString, temperature), 'effective current density') / 1000000 / coil.functionalDescription[windingIndex].numberParallels;
+                data.effectiveSkinDepth = refused(await mkf.calculate_effective_skin_depth(wireMaterial, currentString, temperature), 'effective skin depth');
             } else {
                 // Set default values when no current data is available
                 data.skinAcResistancePerMeter = data.dcResistancePerMeter;

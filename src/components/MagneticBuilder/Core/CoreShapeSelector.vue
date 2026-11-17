@@ -179,6 +179,10 @@ export default {
                         this.localData["shapeFamily"] = magnetic.core.functionalDescription.shape.family;
                     }
                 }
+                if (name == "coreChangeRefused") {
+                    // The core panel put the previous core back (ABT #2410): show its shape again.
+                    this.assignLocalData(this.masStore.mas.magnetic.core);
+                }
                 if (name == "coreShapeProcessed") {
                     if (args[0]) {
                         const shape = args[1];

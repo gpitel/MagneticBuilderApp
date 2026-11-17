@@ -11,6 +11,9 @@ import { useRefusedCoreMaterialStore } from '../../../stores/refusedCoreMaterial
 <script>
 // Warnings and errors go to the host's log when it has one (notices.js).
 import { reportNotice, noticesShownInline } from '/WebSharedComponents/assets/js/notices.js'
+import { engineMessageInFull, engineMessageFirstSentence } from '../engineMessage.js'
+import { describeCoreHold } from '../coreHold.js'
+import { coreInfoModels } from './coreInfoModels.js'
 
 export default {
     props: {
@@ -47,6 +50,10 @@ export default {
         const tryingToSend = false;
         const dataUptoDate = false;
         const simulationError = '';
+        // The results (permeabilities, flux densities, inductance, losses) belong to the design they
+        // were computed for. A failed simulation hides them: the last good numbers of another core must
+        // not sit next to this core's geometry (ABT #2277).
+        const resultsShown = false;
         const subscriptions = [];
 
         return {
@@ -61,10 +68,24 @@ export default {
             tryingToSend,
             dataUptoDate,
             simulationError,
+            resultsShown,
             subscriptions,
         }
     },
     computed: {
+        simulationErrorShort() {
+            return engineMessageFirstSentence(this.simulationError);
+        },
+        simulationErrorFull() {
+            return engineMessageInFull(this.simulationError);
+        },
+        // ABT #2273 / #2370: the core's own losses drove it past its material's data and MKF held it
+        // at the limit. Held there (at Curie the core is paramagnetic) the losses are not the
+        // design's, so they are never shown as the result: the panel shows this error instead, with
+        // the losses just before the hold. Null when the core was not held.
+        coreHold() {
+            return describeCoreHold(this.coreLossesData);
+        },
         // MKF refused the design's copy of its core material when it was loaded: nothing is
         // computed with it until it is updated (Alf, 2026-10-27).
         refusedCoreMaterial() {
@@ -105,8 +126,8 @@ export default {
                 }
             },
         },
-    },
-    watch: {
+        // (One watch block: a second `watch:` key in this object replaced the first, and the two
+        // watchers above never ran -- ABT #2277.)
         simulationError(message) {
             reportNotice('ERROR', 'Core info', message);
         },
@@ -230,19 +251,14 @@ export default {
                 // computed again.
                 this.simulationError = '';
                 this.dataUptoDate = false;
+                this.resultsShown = false;
                 return;
             }
             // Check if there are pending simulation models from the state store
             const pendingModels = this.$stateStore.pendingSimulationModels;
             
             // Use pending models if available, otherwise fall back to store values
-            const modelsData = {
-                coreLosses: this.$userStore.selectedModels['coreLosses'] || Defaults.coreLossesModelDefault,
-                coreTemperature: this.$userStore.selectedModels['coreTemperature'] || Defaults.coreTemperatureModelDefault,
-                gapReluctance: this.$userStore.selectedModels['gapReluctance'] || Defaults.reluctanceModelDefault,
-                magneticFieldStrength: pendingModels?.magneticFieldStrengthModel || this.modelSettingsStore.magneticFieldStrengthModel,
-                magneticFieldStrengthFringingEffect: pendingModels?.magneticFieldStrengthFringingEffectModel || this.modelSettingsStore.magneticFieldStrengthFringingEffectModel
-            };
+            const modelsData = coreInfoModels(this.$userStore, this.modelSettingsStore, pendingModels);
             
             // Note: Don't clear pending models here - let CoilInfo.vue also use them
             // The field-strength models are loaded from the engine asynchronously on first open; until
@@ -275,6 +291,10 @@ export default {
                         this.magnetizingInductanceCheck = data.magnetizingInductanceCheck;
                         this.dataUptoDate = true;
                         this.simulationError = '';
+                        this.resultsShown = true;
+                        // The hold is shown in this panel ("Held at ...") and the Simulation findings say the
+                        // core runs past its material data; a third copy in the Engine log only repeated them
+                        // (ABT #2302, Alf 2026-11-07).
                     }
                 })
                 .catch(error => {
@@ -282,6 +302,7 @@ export default {
                     // left the user staring at losses that never arrive.
                     this.simulationError = error?.message || String(error);
                     this.dataUptoDate = false;
+                    this.resultsShown = false;
                     console.error(error);
                 });
             }
@@ -297,7 +318,19 @@ export default {
                 <i class="pi pi-box"></i>
                 <span>Core Info</span>
             </div>
-            <div v-if="!dataUptoDate && hasCalculableData" class="coreinfo-outdated-badge">Outdated</div>
+            <div class="coreinfo-header-right">
+                <!-- In the title bar, right-aligned (Alf, 2026-11-05). -->
+                <span
+                    v-if="resultsShown && coreHold != null"
+                    :data-cy="dataTestLabel + '-CoreInfo-HeldAtDataLimit'"
+                    class="coreinfo-hold-hint text-danger"
+                    tabindex="0"
+                    role="note"
+                    v-tooltip="coreHold.full"
+                    :aria-label="coreHold.full"
+                ><i class="pi pi-exclamation-triangle"></i> {{ coreHold.short }}</span>
+                <div v-if="!dataUptoDate && hasCalculableData" class="coreinfo-outdated-badge">Outdated</div>
+            </div>
         </div>
         <div class="coreinfo-body">
             <h6
@@ -306,11 +339,24 @@ export default {
                 v-tooltip="refusedCoreMaterial.message"
                 class="text-danger my-2"
             >The core material {{ refusedCoreMaterial.name }} must be updated: the engine refuses this design's copy of its data, so nothing is computed with it. Update it to the library's copy, or choose another material.</h6>
+            <!-- A core change the engine refused (ABT #2410): the design kept its previous core, and this
+                 says why, here as well as in the Engine log. -->
             <h6
-                v-if="inlineNotices() && simulationError"
-                :data-cy="dataTestLabel + '-CoreInfo-SimulationError'"
+                v-if="taskQueueStore.coreChangeRefusal"
+                :data-cy="dataTestLabel + '-CoreInfo-CoreChangeRefused'"
+                v-tooltip="taskQueueStore.coreChangeRefusal"
+                :aria-label="taskQueueStore.coreChangeRefusal"
                 class="text-danger my-2"
-            >{{ simulationError }}</h6>
+            >The core was not changed, the design keeps its previous core: {{ taskQueueStore.coreChangeRefusal }}</h6>
+            <!-- Shown here as well as in the Engine log (Alf, 2026-11-05, ABT #2277): a Resimulate that
+                 fails must say so where the user is looking. First sentence inline, all of it on hover. -->
+            <h6
+                v-if="simulationError"
+                :data-cy="dataTestLabel + '-CoreInfo-SimulationError'"
+                v-tooltip="simulationErrorFull"
+                :aria-label="simulationErrorFull"
+                class="text-danger my-2"
+            >{{ simulationErrorShort }}</h6>
             <template v-if="advancedMode">
                 <div class="coreinfo-grid" :class="{ 'coreinfo-dimmed': !dataUptoDate }" v-if="coreEffectiveParameters.effectiveLength != null">
                     <div class="coreinfo-cell">
@@ -397,6 +443,7 @@ export default {
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
                         />
                     </div>
+                    <template v-if="resultsShown">
                     <div class="coreinfo-cell">
                         <DimensionReadOnly 
                             v-tooltip="tooltipsMagneticBuilder.initialPermeability"
@@ -505,7 +552,8 @@ export default {
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
                         />
                     </div>
-                    <div class="coreinfo-cell">
+                    <!-- On a held core B is computed on the paramagnetic (mu_r = 1) core, far below the design's: hidden, the core-losses error says why. -->
+                    <div class="coreinfo-cell" v-if="coreHold == null">
                         <DimensionReadOnly 
                             v-tooltip="tooltipsMagneticBuilder.magneticFluxDensityPeak"
                             class="text-left"
@@ -527,7 +575,8 @@ export default {
                             :textColor="closeOrOverSaturation? $styleStore.magneticBuilder.inputLabelDangerBgColor : $styleStore.magneticBuilder.inputTextColor"
                         />
                     </div>
-                    <div class="coreinfo-cell">
+                    <!-- On a held core B is computed on the paramagnetic (mu_r = 1) core, far below the design's: hidden, the core-losses error says why. -->
+                    <div class="coreinfo-cell" v-if="coreHold == null">
                         <DimensionReadOnly 
                             v-tooltip="tooltipsMagneticBuilder.magneticFluxDensityAcPeak"
                             class="text-left"
@@ -571,7 +620,7 @@ export default {
                         />
                     </div>
                     <div class="coreinfo-cell">
-                        <DimensionReadOnly 
+                        <DimensionReadOnly v-if="coreHold == null"
                             v-tooltip="tooltipsMagneticBuilder.coreLosses"
                             class="text-left"
                             :name="'P'"
@@ -592,6 +641,7 @@ export default {
                             :textColor="$styleStore.magneticBuilder.inputTextColor"
                         />
                     </div>
+                    </template>
                 </div>
                 <p
                     v-else
@@ -602,6 +652,7 @@ export default {
             </template>
             <template v-else>
                 <div class="coreinfo-simple" :class="{ 'coreinfo-dimmed': !dataUptoDate }" v-if="coreEffectiveParameters.effectiveLength != null">
+                    <template v-if="resultsShown">
                     <DimensionReadOnly 
                         v-tooltip="tooltipsMagneticBuilder.magnetizingInductance"
                         class="text-left pl-4 pr-4"
@@ -622,7 +673,7 @@ export default {
                         :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                         :textColor="magnetizingInductanceCheck? $styleStore.magneticBuilder.inputTextColor : $styleStore.magneticBuilder.inputLabelDangerBgColor"
                     />
-                    <DimensionReadOnly 
+                    <DimensionReadOnly v-if="coreHold == null"
                         v-tooltip="tooltipsMagneticBuilder.coreLosses"
                         class="text-left pl-4 pr-4"
                         :replaceTitle="'Core Losses'"
@@ -642,7 +693,8 @@ export default {
                         :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                         :textColor="$styleStore.magneticBuilder.inputTextColor"
                     />
-                    <DimensionReadOnly 
+                    <!-- Computed on the held (paramagnetic) core: hidden with the losses. -->
+                    <DimensionReadOnly v-if="coreHold == null"
                         v-tooltip="tooltipsMagneticBuilder.saturationProportion"
                         class="text-left pl-4 pr-4"
                         :name="'Saturation Proportion'"
@@ -661,6 +713,7 @@ export default {
                         :valueBgColor="$styleStore.magneticBuilder.inputValueBgColor"
                         :textColor="closeOrOverSaturation? $styleStore.magneticBuilder.inputLabelDangerBgColor : $styleStore.magneticBuilder.inputTextColor"
                     />
+                    </template>
                 </div>
                 <p
                     v-else
@@ -730,6 +783,23 @@ export default {
     margin: 0;
     padding: 0.9rem 0.4rem;
     text-align: center;
+}
+
+.coreinfo-header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.coreinfo-hold-hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: normal;
+    cursor: help;
 }
 
 .coreinfo-grid {

@@ -13,7 +13,9 @@ export const useRefusedCoreMaterialStore = defineStore("refusedCoreMaterial", ()
     const refusedByMas = ref({});
 
     function set(masStoreId, material, message) {
-        refusedByMas.value = { ...refusedByMas.value, [masStoreId]: { material: JSON.stringify(material), name: material.name, message } };
+        // A material list ([drum, shell] on a semi-shielded drum): the refused copy is its first entry.
+        const name = Array.isArray(material) ? material[0]?.name : material.name;
+        refusedByMas.value = { ...refusedByMas.value, [masStoreId]: { material: JSON.stringify(material), name, message } };
     }
 
     function clear(masStoreId) {

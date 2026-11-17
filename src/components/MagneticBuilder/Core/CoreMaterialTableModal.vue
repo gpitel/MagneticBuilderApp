@@ -23,6 +23,7 @@ const MATERIAL_TYPE_LABELS = {
     nanocrystalline: 'Nanocrystalline',
     amorphous: 'Amorphous',
     electricalSteel: 'Electrical steel',
+    magneticEpoxy: 'Magnetic epoxy',
 };
 
 const COMPOSITION_LABELS = {

@@ -4,6 +4,7 @@ import { useHistoryStore } from '../stores/history'
 import { download, pruneNulls, deepCopy } from '/WebSharedComponents/assets/js/utils.js'
 import Settings from './MagneticBuilder/Settings.vue'
 import { useTaskQueueStore } from '../stores/taskQueue'
+import { giveCoreShapesTheirCurrentNames } from './MagneticBuilder/Core/coreShapeNames.js'
 </script>
 
 
@@ -93,6 +94,15 @@ export default {
                     return;
                 }
                 try {
+                    // A shape the catalogue has renamed (its old name kept as an alias) is loaded under its
+                    // current name, as MKF resolves it, so the shape list shows it (ABT #2410, #2413).
+                    const shapeNames = await giveCoreShapesTheirCurrentNames(newMas, this.taskQueueStore);
+                    for (const { from, to } of shapeNames.renames) {
+                        console.warn(`Imported MAS: core shape '${from}' is now called '${to}' in the catalogue; the design was loaded with that name`);
+                    }
+                    for (const { name, reason } of shapeNames.unknown) {
+                        console.warn(`Imported MAS: core shape '${name}' is not in the catalogue (${reason}); the design keeps it and its stored dimensions`);
+                    }
                     // Pass `newMas` (the file just read), not `this.masStore.mas`
                     const response = await this.taskQueueStore.checkAndFixMas(newMas);
 

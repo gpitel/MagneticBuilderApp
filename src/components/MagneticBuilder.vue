@@ -47,6 +47,9 @@ const LOCALLY_REPORTED_ACTIONS = new Set([
     'simulated',
     'resultsAnalyzed',
     'coreLossesCalculated',
+    // The Core panel reports a failed or empty Core Advise itself, with the engine's reason;
+    // reported here as well, one advise was two records.
+    'coreAdvised',
 ]);
 
 // The part of the builder each other calculation belongs to, as the Engine log names it.
@@ -109,6 +112,18 @@ export default {
         enableSimulation: {
             type: Boolean,
             default: true,
+        },
+        // Show the core's effective parameters (le, Ae, Ve, and a tape-wound core's fill factor) in the core panel
+        // without running a simulation: for hosts that only define the magnetic (CoreDataX).
+        showEffectiveParameters: {
+            type: Boolean,
+            default: false,
+        },
+        // A material picked while the core was never processed (shape chosen first) completes the core through
+        // checkAndFixMas instead of only reprocessing it. Off by default; CoreDataX turns it on.
+        completeCoreOnMaterialChange: {
+            type: Boolean,
+            default: false,
         },
         enableAdvisers: {
             type: Boolean,
@@ -232,6 +247,8 @@ export default {
                 enableGraphs: this.enableGraphs && this.magneticBuilderSettingsStore.enableGraphs,
                 showInterleavingOrder: this.showInterleavingOrder,
                 enableTemperaturePlot: this.enableTemperaturePlot,
+                showEffectiveParameters: this.showEffectiveParameters,
+                completeCoreOnMaterialChange: this.completeCoreOnMaterialChange,
             };
         },
         enableVisualizers() {

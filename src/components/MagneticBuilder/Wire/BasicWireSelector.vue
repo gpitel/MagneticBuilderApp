@@ -529,7 +529,17 @@ export default {
                         this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex] = winding;
                         // Preserve sections/layers/turns layout from adviser (e.g. CMC spacers); only wipe if absent.
                         // The layers carry the interlayer insulation, which cannot be rebuilt from sections and turns (ABT #1892)
-                        if (result.coil?.sectionsDescription) {
+                        // The adviser winds its layout with its own copy of the OTHER windings too (on a new
+                        // magnetic it gave the "Dummy" secondary two parallels), and only this winding is kept
+                        // here. That layout then described turns the coil does not have, and core losses
+                        // failed with a bare "Exception: vector" (Alf, 2026-11-05). It is kept only when
+                        // every other winding is the one the coil holds; otherwise the coil is rewound.
+                        const windingKey = (each) => JSON.stringify([each.name, each.numberTurns, each.numberParallels,
+                            typeof each.wire === 'string' ? each.wire : (each.wire?.name ?? each.wire)]);
+                        const otherWindingsUnchanged = result.coil?.functionalDescription?.length == this.masStore.mas.magnetic.coil.functionalDescription.length &&
+                            result.coil.functionalDescription.every((advised, index) => index == this.windingIndex ||
+                                windingKey(advised) == windingKey(this.masStore.mas.magnetic.coil.functionalDescription[index]));
+                        if (result.coil?.sectionsDescription && otherWindingsUnchanged) {
                             this.masStore.mas.magnetic.coil.sectionsDescription = result.coil.sectionsDescription;
                             this.masStore.mas.magnetic.coil.layersDescription = result.coil.layersDescription ?? null;
                             this.masStore.mas.magnetic.coil.turnsDescription = result.coil.turnsDescription ?? null;

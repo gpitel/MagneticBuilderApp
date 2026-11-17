@@ -232,6 +232,12 @@ export default {
                 return;
             }
 
+            // A material with no name yet (a semi-shielded drum's shell the user is starting, ABT #2410) is
+            // not in the catalogue: there is nothing to load, its data is what the user enters.
+            if (material.name == null || material.name === '') {
+                return;
+            }
+
             // Use MKF WASM to load full material data (no backend required)
             this.taskQueueStore.processCoreMaterial(material.name);
         },

@@ -4,9 +4,16 @@ import { wireMaterialDefault } from '/WebSharedComponents/assets/js/defaults.js'
 import { effectiveBobbin } from '/WebSharedComponents/assets/js/utils.js'
 import { tooltipsMagneticBuilder } from '/WebSharedComponents/assets/js/texts.js'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
+import { reportNotice } from '/WebSharedComponents/assets/js/notices.js'
+import { engineMessageInFull, engineMessageFirstSentence } from '../engineMessage.js'
 </script>
 
 <script>
+// Wire Info of every winding, as last computed, keyed by design store, operating point and winding,
+// with the inputs it was computed from. Resimulate computes every winding although one is shown;
+// switching winding shows that winding's result while its inputs are unchanged, instead of an empty
+// Outdated panel (Alf, 2026-11-05: "resimulate doesn't update the windings that are not selected").
+const wireInfoResults = new Map();
 
 export default {
     props: {
@@ -67,11 +74,20 @@ export default {
             recentChange,
             tryingToSend,
             dataUptoDate,
+            // MKF's refusal of this wire's figures (ABT #2277): shown instead of the figures, which
+            // would otherwise be the binding's -1 (Jeff of -0.08 uA/mm2) or another winding's.
+            wireError: '',
             subscriptions,
             _simTimer: null,
         }
     },
     computed: {
+        wireErrorShort() {
+            return engineMessageFirstSentence(this.wireError);
+        },
+        wireErrorFull() {
+            return engineMessageInFull(this.wireError);
+        },
         tooMuchCurrentDensity() {
             return this.effectiveCurrentDensity > 12;
         },
@@ -126,6 +142,17 @@ export default {
         },
     },
     watch: {
+        'windingIndex': {
+            handler() {
+                this.wireError = '';
+                if (this.enableAutoSimulation) {
+                    this.calculateWireData();
+                }
+                else {
+                    this.showStoredResult();
+                }
+            },
+        },
         'operatingPointIndex': {
             handler(newValue, oldValue) {
                 this.calculateWireData();
@@ -161,27 +188,6 @@ export default {
                         console.error(args[1])
                     }
                 }
-                if (name == "wireDataCalculated") {
-                    if (args[0]) {
-                        const data = args[1];
-
-                        this.turnsRatio = data.turnsRatio;
-                        this.dcResistancePerMeter = data.dcResistancePerMeter;
-                        this.skinAcResistancePerMeter = data.skinAcResistancePerMeter;
-                        this.skinAcFactor = data.skinAcFactor;
-                        this.dcLossesPerMeter = data.dcLossesPerMeter;
-                        this.skinAcLossesPerMeter = data.skinAcLossesPerMeter;
-                        this.outerDimensions = data.outerDimensions;
-                        this.effectiveCurrentDensity = data.effectiveCurrentDensity;
-                        this.effectiveSkinDepth = data.effectiveSkinDepth;
-
-                        this.computeIfCompliesWithTurnsRatio();
-                        this.dataUptoDate = true;
-                    }
-                    else {
-                        console.error(args[1])
-                    }
-                }
                 if (name == "newWireCreated") {
                     if (args[0]) {
                         this.dataUptoDate = false;
@@ -209,13 +215,16 @@ export default {
         this.subscriptions.push(this.$stateStore.$onAction(({name, after}) => {
             after(() => {
                 if (name == "resimulate") {
-                    this.calculateWireData();
+                    this.calculateAllWindings();
                 }
             });
         }))
 
         if (this.enableAutoSimulation) {
             this.calculateWireData();
+        }
+        else {
+            this.showStoredResult();
         }
         this.taskQueueStore.checkAndFixMas(this.masStore.mas);
     },
@@ -255,13 +264,73 @@ export default {
                 this.compliesWithTurnsRatio = true;
             }
         },
-        calculateWireData() {
-            if (this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex].wire != "" &&
-                this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex].wire != "Dummy" &&
-                this.masStore.mas.magnetic.coil.functionalDescription[this.windingIndex].wire != null) {
-
-                this.taskQueueStore.calculateWireData(this.masStore.mas.magnetic.coil, this.masStore.mas.inputs.operatingPoints[this.operatingPointIndex], this.windingIndex)
+        resultKey(windingIndex) {
+            return `${this.masStore.$id}|${this.operatingPointIndex}|${windingIndex}`;
+        },
+        // Everything a winding's Wire Info is computed from.
+        inputsOf(windingIndex) {
+            const windings = this.masStore.mas.magnetic.coil.functionalDescription;
+            const operatingPoint = this.masStore.mas.inputs.operatingPoints[this.operatingPointIndex];
+            return JSON.stringify([
+                windings[windingIndex].wire,
+                windings[windingIndex].numberParallels,
+                windings[windingIndex].numberTurns,
+                windings[0].numberTurns,
+                operatingPoint?.excitationsPerWinding?.[windingIndex]?.current ?? null,
+                operatingPoint?.conditions?.ambientTemperature ?? null,
+            ]);
+        },
+        showData(data) {
+            this.turnsRatio = data.turnsRatio;
+            this.dcResistancePerMeter = data.dcResistancePerMeter;
+            this.skinAcResistancePerMeter = data.skinAcResistancePerMeter;
+            this.skinAcFactor = data.skinAcFactor;
+            this.dcLossesPerMeter = data.dcLossesPerMeter;
+            this.skinAcLossesPerMeter = data.skinAcLossesPerMeter;
+            this.outerDimensions = data.outerDimensions;
+            this.effectiveCurrentDensity = data.effectiveCurrentDensity;
+            this.effectiveSkinDepth = data.effectiveSkinDepth;
+            this.computeIfCompliesWithTurnsRatio();
+            this.dataUptoDate = true;
+            this.wireError = '';
+        },
+        // The shown winding's last result, if its inputs have not changed since; Outdated otherwise.
+        showStoredResult() {
+            const stored = wireInfoResults.get(this.resultKey(this.windingIndex));
+            if (stored != null && stored.inputs === this.inputsOf(this.windingIndex)) {
+                this.showData(stored.data);
             }
+            else {
+                this.dataUptoDate = false;
+            }
+        },
+        calculateAllWindings() {
+            this.masStore.mas.magnetic.coil.functionalDescription.forEach((_, windingIndex) => this.calculateWireData(windingIndex));
+        },
+        calculateWireData(windingIndex = this.windingIndex) {
+            const wire = this.masStore.mas.magnetic.coil.functionalDescription[windingIndex].wire;
+            if (wire == "" || wire == "Dummy" || wire == null) {
+                return;
+            }
+            const key = this.resultKey(windingIndex);
+            this.taskQueueStore.calculateWireData(this.masStore.mas.magnetic.coil, this.masStore.mas.inputs.operatingPoints[this.operatingPointIndex], windingIndex)
+            .then((data) => {
+                // Inputs read after the call: it resolves a wire given by name into the coil.
+                wireInfoResults.set(key, { inputs: this.inputsOf(windingIndex), data });
+                if (windingIndex === this.windingIndex) {
+                    this.showData(data);
+                }
+            })
+            .catch((error) => {
+                wireInfoResults.delete(key);
+                const message = error?.message || String(error);
+                if (windingIndex === this.windingIndex) {
+                    this.wireError = message;
+                    this.dataUptoDate = false;
+                }
+                reportNotice('ERROR', 'Wire info', message);
+                console.error(error);
+            });
         },
     }
 }
@@ -277,8 +346,15 @@ export default {
             <div v-if="!dataUptoDate && hasCalculableData" class="wireinfo-outdated-badge">Outdated</div>
         </div>
         <div class="wireinfo-body">
+            <h6
+                v-if="wireError"
+                :data-cy="dataTestLabel + '-WireInfo-Error'"
+                v-tooltip="wireErrorFull"
+                :aria-label="wireErrorFull"
+                class="text-danger my-2"
+            >{{ wireErrorShort }}</h6>
             <template v-if="advancedMode">
-                <div class="wireinfo-grid" :class="{ 'wireinfo-dimmed': !dataUptoDate }">
+                <div v-if="!wireError" class="wireinfo-grid" :class="{ 'wireinfo-dimmed': !dataUptoDate }">
                     <div class="wireinfo-cell">
                         <DimensionReadOnly
                             v-tooltip="tooltipsMagneticBuilder.dcResistancePerMeter"
@@ -482,7 +558,7 @@ export default {
                 </div>
             </template>
             <template v-else>
-                <div class="wireinfo-simple" :class="{ 'wireinfo-dimmed': !dataUptoDate }">
+                <div v-if="!wireError" class="wireinfo-simple" :class="{ 'wireinfo-dimmed': !dataUptoDate }">
                     <DimensionReadOnly
                         v-tooltip="tooltipsMagneticBuilder.effectiveCurrentDensity"
                         class="text-left pl-4 pr-4"

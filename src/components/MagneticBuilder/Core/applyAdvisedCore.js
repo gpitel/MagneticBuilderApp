@@ -14,7 +14,10 @@ export async function applyAdvisedCore({ masStore, taskQueueStore, historyStore,
     const advisedShape = magnetic?.core?.functionalDescription?.shape;
     const advisedShapeName = typeof advisedShape === 'string' ? advisedShape : advisedShape?.name;
     if (!advisedShapeName) {
-        throw new Error('The core adviser returned no candidate for these requirements');
+        const error = new Error('The core adviser returned no candidate for these requirements: its design has no core shape.');
+        error.noCandidate = true;
+        error.engineReason = 'The advised design has no core shape.';
+        throw error;
     }
 
     masStore.mas.magnetic.core = magnetic.core;

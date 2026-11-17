@@ -5,6 +5,7 @@ import AdvancedCoreSelectorMaterial from './AdvancedCoreSelector/AdvancedCoreSel
 import { useHistoryStore } from '../../../stores/history'
 import { deepCopy } from '/WebSharedComponents/assets/js/utils.js'
 import { useTaskQueueStore } from '../../../stores/taskQueue'
+import { newShellMaterial, shellMaterialIncompleteMessage } from './shellMaterial.js'
 
 </script>
 
@@ -36,6 +37,21 @@ export default {
         const forceUpdate = 0;
         const localCore = deepCopy(this.masStore.mas.magnetic.core);
         const subscriptions = [];
+        // The material editor edits one material. A core with a material list ([drum, magnetic-epoxy
+        // shell] on a semi-shielded drum, ABT #2410) gives it the entry being edited, held apart and
+        // written back into the list on Apply.
+        const materialEditTarget = taskQueueStore.coreMaterialEditTarget;
+        const materialList = localCore.functionalDescription.material;
+        let materialHolder = null;
+        if (materialEditTarget == 'shell') {
+            // A shell not defined yet starts with NO magnetic data (shellMaterial.js): the user enters its
+            // name, type (magnetic epoxy) and permeability. Nothing is copied from the drum.
+            const shellMaterial = Array.isArray(materialList) && materialList.length > 1 ? materialList[1] : newShellMaterial();
+            materialHolder = { functionalDescription: { material: deepCopy(shellMaterial) } };
+        }
+        else if (Array.isArray(materialList)) {
+            materialHolder = { functionalDescription: { material: deepCopy(materialList[0]) } };
+        }
 
         return {
             taskQueueStore,
@@ -46,6 +62,9 @@ export default {
             forceUpdate,
             localCore,
             subscriptions,
+            materialEditTarget,
+            materialHolder,
+            shellIncompleteMessage: null,
         }
     },
     computed: {
@@ -91,6 +110,7 @@ export default {
     },
     beforeUnmount () {
         this.subscriptions.forEach((subscription) => {subscription();})
+        this.taskQueueStore.coreMaterialEditTarget = 'core';
     },
     watch: {
         errorMessage(message) {
@@ -104,7 +124,66 @@ export default {
         customizedCore(customCore) {
             this.masStore.mas.magnetic.core = customCore;
         },
+        /** Puts the edited entry of a material list back into it (ABT #2410). */
+        writeBackMaterialEntry() {
+            if (this.materialHolder == null) return;
+            const edited = deepCopy(this.materialHolder.functionalDescription.material);
+            const functionalDescription = this.localCore.functionalDescription;
+            const list = Array.isArray(functionalDescription.material) ? functionalDescription.material : [functionalDescription.material];
+            if (this.materialEditTarget == 'shell') {
+                functionalDescription.material = [list[0], edited];
+                // The shell is material[1]; the deprecated magneticEpoxy coating form is not written, and
+                // one left from an older design would contradict it.
+                const coating = functionalDescription.coating;
+                if (coating != null && (coating == 'magneticEpoxy' || coating.type == 'magneticEpoxy')) {
+                    functionalDescription.coating = null;
+                }
+            }
+            else {
+                functionalDescription.material = [edited, ...list.slice(1)];
+            }
+        },
         applyChanges() {
+            if (this.materialEditTarget == 'shell') {
+                // A shell without its permeability is not applied: the core would have nothing to compute
+                // the shell's reluctance from. The core keeps its previous state and the editor says what
+                // is missing (ABT #2410).
+                this.shellIncompleteMessage = shellMaterialIncompleteMessage(this.materialHolder.functionalDescription.material);
+                if (this.shellIncompleteMessage != null) {
+                    return;
+                }
+            }
+            this.writeBackMaterialEntry();
+            const original = this.masStore.mas.magnetic.core.functionalDescription;
+            const geometryUnchanged = ['shape', 'gapping', 'numberStacks'].every((key) =>
+                JSON.stringify(original[key]) == JSON.stringify(this.localCore.functionalDescription[key]));
+            if (this.materialEditTarget == 'shell' && geometryUnchanged) {
+                // Only the shell material changed: the core keeps its shape, bobbin and coil. It is
+                // processed again so every panel recalculates with the shell.
+                // Applied whole or not at all, like a core change in the core panel: a core the engine
+                // refuses puts the previous one back and says why (Core Info and the Engine log).
+                const previousCore = deepCopy(this.masStore.mas.magnetic.core);
+                const taskQueueStore = this.taskQueueStore;
+                const masStore = this.masStore;
+                const historyStore = this.historyStore;
+                taskQueueStore.coreMaterialEditTarget = 'core';
+                masStore.mas.magnetic.core = deepCopy(this.localCore);
+                this.$stateStore.magneticBuilder.mode.core = this.$stateStore.MagneticBuilderModes.Basic;
+                taskQueueStore.processCore(masStore.mas.magnetic.core).then(() => {
+                    if (taskQueueStore.coreChangeRefusal !== '') {
+                        taskQueueStore.coreChangeAccepted();
+                    }
+                    historyStore.addToHistory(masStore.mas);
+                })
+                .catch((error) => {
+                    const reason = String(error?.message ?? error).replace(/^(Error: )?Exception: /, '');
+                    masStore.mas.magnetic.core = previousCore;
+                    taskQueueStore.coreChangeRefused(reason);
+                    reportNotice('ERROR', 'Core', `The shell material was not changed, the design keeps its previous core: ${reason}`);
+                });
+                return;
+            }
+            this.taskQueueStore.coreMaterialEditTarget = 'core';
             this.localCore.functionalDescription.shape.type = "custom";
             this.localCore.name = "Custom";
             this.masStore.mas.magnetic.manufacturerInfo = null;
@@ -116,6 +195,7 @@ export default {
             });
         },
         cancelChanges() {
+            this.taskQueueStore.coreMaterialEditTarget = 'core';
             this.$stateStore.magneticBuilder.mode.core = this.$stateStore.MagneticBuilderModes.Basic;
         },
         errorInDimensions() {
@@ -132,7 +212,8 @@ export default {
     <div class="advcore-panel">
         <div class="advcore-header">
             <i class="pi pi-wrench"></i>
-            <span>Custom magnetic core</span>
+            <span v-if="materialEditTarget == 'shell'" :data-cy="dataTestLabel + '-ShellMaterialTitle'">Shell material of the semi-shielded drum (magnetic epoxy)</span>
+            <span v-else>Custom magnetic core</span>
         </div>
         <div class="advcore-body">
             <img :data-cy="dataTestLabel + '-BasicCoreSelector-loading'" v-if="loading" class="mx-auto d-block advcore-loading" alt="loading" :src="$settingsStore.loadingGif">
@@ -154,9 +235,10 @@ export default {
             <AdvancedCoreSelectorMaterial
                 v-if="$stateStore.magneticBuilder.submode.core == $stateStore.MagneticBuilderCoreSubmodes.Material"
                 :dataTestLabel="dataTestLabel + '-AdvancedCoreSelectorMaterial'"
-                :core="localCore"
+                :core="materialHolder ?? localCore"
                 :enableSimulation="true"
             />
+            <label v-if="shellIncompleteMessage != null" :data-cy="dataTestLabel + '-ShellMaterialIncomplete'" class="text-danger col-12 pt-1 advcore-error">{{shellIncompleteMessage}}</label>
             <label v-if="inlineNotices()" class="text-danger col-12 pt-1 advcore-error">{{errorMessage}}</label>
         </div>
     </div>
